@@ -799,7 +799,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 0bcb5bc2fdc2e9981a51f00db48ccfb5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3353515984767460272, guid: 0bcb5bc2fdc2e9981a51f00db48ccfb5, type: 3}
       propertyPath: m_StaticEditorFlags
       value: 2147483647
@@ -1321,7 +1321,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3333541113208289002, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_LightProbeUsage
       value: 0
@@ -1837,7 +1837,7 @@ PrefabInstance:
     - target: {fileID: 5614758927437073876, guid: b656a78d6a1ac925a863955c39137f8d, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 5818521690164746105, guid: b656a78d6a1ac925a863955c39137f8d, type: 3}
       propertyPath: m_Name
       value: DoorToHallway002
@@ -2288,6 +2288,10 @@ PrefabInstance:
     - target: {fileID: 3257520339749008480, guid: a00613f366f113e42abb9460b868d039, type: 3}
       propertyPath: m_Range
       value: 3
+      objectReference: {fileID: 0}
+    - target: {fileID: 3257520339749008480, guid: a00613f366f113e42abb9460b868d039, type: 3}
+      propertyPath: m_Intensity
+      value: 0.5
       objectReference: {fileID: 0}
     - target: {fileID: 3257520339749008480, guid: a00613f366f113e42abb9460b868d039, type: 3}
       propertyPath: m_Lightmapping
@@ -3174,7 +3178,7 @@ PrefabInstance:
     - target: {fileID: 5614758927437073876, guid: b656a78d6a1ac925a863955c39137f8d, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 5818521690164746105, guid: b656a78d6a1ac925a863955c39137f8d, type: 3}
       propertyPath: m_Name
       value: DoorToRoom003
@@ -3793,7 +3797,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 0bcb5bc2fdc2e9981a51f00db48ccfb5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3353515984767460272, guid: 0bcb5bc2fdc2e9981a51f00db48ccfb5, type: 3}
       propertyPath: m_StaticEditorFlags
       value: 2147483647
@@ -4056,7 +4060,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3333541113208289002, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_LightProbeUsage
       value: 0
@@ -4716,7 +4720,7 @@ PrefabInstance:
     - target: {fileID: 5614758927437073876, guid: b656a78d6a1ac925a863955c39137f8d, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 5818521690164746105, guid: b656a78d6a1ac925a863955c39137f8d, type: 3}
       propertyPath: m_Name
       value: DoorToRoom001
@@ -4948,7 +4952,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3333541113208289002, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_LightProbeUsage
       value: 0
@@ -5909,7 +5913,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3333541113208289002, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_LightProbeUsage
       value: 0
@@ -6142,7 +6146,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3333541113208289002, guid: 553de4abe7620eb378737204678971d5, type: 3}
       propertyPath: m_LightProbeUsage
       value: 0
@@ -7485,7 +7489,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: 0bcb5bc2fdc2e9981a51f00db48ccfb5, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3353515984767460272, guid: 0bcb5bc2fdc2e9981a51f00db48ccfb5, type: 3}
       propertyPath: m_StaticEditorFlags
       value: 2147483647
@@ -7725,6 +7729,10 @@ PrefabInstance:
       value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 3257520339749008480, guid: a00613f366f113e42abb9460b868d039, type: 3}
+      propertyPath: m_Intensity
+      value: 0.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 3257520339749008480, guid: a00613f366f113e42abb9460b868d039, type: 3}
       propertyPath: m_Lightmapping
       value: 2
       objectReference: {fileID: 0}
@@ -7941,6 +7949,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   ConfigFileName: room002.yaml
+  ConfigPath: 
   Interval: 2
   OnFileChanged:
     m_PersistentCalls:
@@ -7984,7 +7993,7 @@ PrefabInstance:
     - target: {fileID: 3101126768889591292, guid: a0bd9b69d846b9a4f9101ca12f891d6f, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: d93614d2ba14f184c86099b5992a6183, type: 2}
+      objectReference: {fileID: 2100000, guid: 23ec956ba93f81a48b30d97eba3039e6, type: 2}
     - target: {fileID: 3256216514265255403, guid: a0bd9b69d846b9a4f9101ca12f891d6f, type: 3}
       propertyPath: m_StaticEditorFlags
       value: 2147483647
