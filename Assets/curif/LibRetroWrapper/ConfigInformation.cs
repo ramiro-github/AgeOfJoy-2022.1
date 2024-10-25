@@ -191,22 +191,57 @@ public class ConfigInformation
         }
     }
 
+    public class CabinetConfigurationResolution
+    {
+        public float resolution;
+        [YamlMember(Alias = "foveated-evel", ApplyNamingConventions = false)]
+        public string foveatedLevelAsString;
+        public OVRPlugin.FoveatedRenderingLevel foveatedLevel()
+        {
+            // true makes it case-insensitive
+            return (OVRPlugin.FoveatedRenderingLevel)Enum.Parse(typeof(OVRPlugin.FoveatedRenderingLevel), foveatedLevelAsString, true);
+        }
+        public static List<string> foveatedLevels()
+        {
+            return Enum.GetNames(typeof(OVRPlugin.FoveatedRenderingLevel))
+                        .Where(name => name != "EnumSize") // Exclude EnumSize
+                        .ToList();
+        }
+        public static List<string> resolutions()
+        {
+            return new List<string>() { "1", "1.3", "1.5", "1.8", "2.0" };
+
+        }
+    }
+
     public class CabinetConfiguration : ConfigInformationBase
     {
         [YamlMember(Alias = "insert-coin-on-startup", ApplyNamingConventions = false)]
         public bool insertCoinOnStartup = true;
+        public static readonly bool insertCoinOnStartupDefault = true;
 
         [YamlMember(Alias = "forced-shader", ApplyNamingConventions = false)]
         public string forcedShader;
+        public static readonly string forcedShaderDefault = null;
 
         [YamlMember(Alias = "screen-glow-intensity", ApplyNamingConventions = false)]
-        public float screenGlowIntensity = 5f;
+        public static readonly float screenGlowIntensityDefault = 5f;
+        public float screenGlowIntensity = screenGlowIntensityDefault;
+
+        public CabinetConfigurationResolution worldResolution = null;
+        public CabinetConfigurationResolution ingameResolution = null;
 
         public override bool IsValid()
         {
             return screenGlowIntensity >= 0;
         }
+
+        public static List<string> GlowIntensities()
+        {
+            return new List<string>() { "None", "1", "2", "3", "4", "5" };
+        }
     }
+
 
     // defaults ===================================================
     public static Background BackgroundInGameDefault()
