@@ -26226,7 +26226,6 @@ MonoBehaviour:
   roomConfiguration: {fileID: 140535417}
   CharacterList:
   - {fileID: 2001728910}
-  - {fileID: 0}
 --- !u!1001 &1859861932
 PrefabInstance:
   m_ObjectHideFlags: 0
