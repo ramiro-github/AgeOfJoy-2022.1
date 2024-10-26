@@ -4,15 +4,12 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using System.IO;
 using System;
 using YamlDotNet.Serialization; //https://github.com/aaubry/YamlDotNet
 using YamlDotNet.Serialization.NamingConventions;
 using System.Linq;
-using System.Reflection;
 
 public class ConfigInformationBase
 {
