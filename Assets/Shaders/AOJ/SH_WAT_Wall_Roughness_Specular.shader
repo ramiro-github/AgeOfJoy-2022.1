@@ -10,6 +10,7 @@ Shader "AgeOfJoy/WorldAligned_Wall_Roughness_Specular"
         _SpecularFalloff("Specular Falloff", Float) = 8.0 // Increase to sharpen
         _LightColor("Light Color", Color) = (1,1,1,1)
         _SmoothnessMultiplier("Smoothness Influence", Float) = 2.0 // Add control for smoothness influence
+        _LightIntensity("Light Intensity", Float) = 2.0 // New property to control light color intensity
     }
     
     SubShader
@@ -28,8 +29,6 @@ Shader "AgeOfJoy/WorldAligned_Wall_Roughness_Specular"
             float2 uv_MainTex;
             float3 worldNormal;
             float3 worldPos;
-            half3 lightDir;     // Offloaded light direction
-            half3 viewDir;      // Offloaded view direction
         };
 
         sampler2D _MainTex;
@@ -40,8 +39,8 @@ Shader "AgeOfJoy/WorldAligned_Wall_Roughness_Specular"
         half _SpecularFalloff;
         half _SmoothnessMultiplier; // Add smoothness multiplier to sharpen specular
         fixed4 _LightColor;
+        half _LightIntensity; // New light intensity multiplier
 
-        // Vertex shader: pre-compute light and view direction in world space
         void vert(inout appdata_full v, out Input o)
         {
             UNITY_INITIALIZE_OUTPUT(Input, o);
@@ -51,12 +50,6 @@ Shader "AgeOfJoy/WorldAligned_Wall_Roughness_Specular"
             
             // Pass world normal to fragment shader
             o.worldNormal = normalize(mul((float3x3)unity_ObjectToWorld, v.normal));
-            
-            // Offload light direction calculation to vertex shader
-            o.lightDir = normalize(_LightPosition - o.worldPos);
-            
-            // Offload view direction calculation to vertex shader
-            o.viewDir = normalize(UnityWorldSpaceViewDir(o.worldPos));
         }
 
         void surf(Input IN, inout SurfaceOutputStandard o)
@@ -86,22 +79,26 @@ Shader "AgeOfJoy/WorldAligned_Wall_Roughness_Specular"
             o.Metallic = _Metallic;
 
             // Lambertian reflection (diffuse term)
-            half lambertian = max(dot(IN.worldNormal, IN.lightDir), 0.0);
+            half3 lightDir = normalize(_LightPosition - IN.worldPos);
+            half lambertian = max(dot(IN.worldNormal, lightDir), 0.0);
 
             // Calculate the fake specular in the fragment shader
-            half3 reflectDir = reflect(-IN.lightDir, IN.worldNormal);
+            half3 reflectDir = reflect(-lightDir, IN.worldNormal);
+
+            // Calculate per-pixel view direction in fragment shader
+            half3 viewDir = normalize(UnityWorldSpaceViewDir(IN.worldPos));
 
             // Use the smoothness value from the alpha channel to modulate the specular sharpness
             half smoothness = c.a * _SmoothnessMultiplier; // Scale smoothness influence
 
             // Modify the specular power with smoothness to control the sharpness of the highlight
-            half spec = pow(max(dot(IN.viewDir, reflectDir), 0.0), _SpecularFalloff * smoothness);
+            half spec = pow(max(dot(viewDir, reflectDir), 0.0), _SpecularFalloff * smoothness);
 
             // Clamp the specular value to keep it sharp
             spec = clamp(spec, 0.0, 1.0);
 
             // Apply light color and intensity to the specular, modulated by diffuse (Lambertian)
-            fixed3 specularHighlight = lambertian * spec * _LightColor.rgb;
+            fixed3 specularHighlight = lambertian * spec * _LightColor.rgb * _LightIntensity;
 
             // Blend the specular highlight with the diffuse texture color
             fixed3 finalSpecular = specularHighlight * c.rgb;
