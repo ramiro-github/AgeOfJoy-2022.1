@@ -2625,6 +2625,7 @@ GameObject:
   m_Component:
   - component: {fileID: 458953150}
   - component: {fileID: 458953149}
+  - component: {fileID: 458953151}
   m_Layer: 0
   m_Name: RoomConfiguration
   m_TagString: Untagged
@@ -2644,13 +2645,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4c56c90c1094b5dab8c0efb3cf6519b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  FileMonitorGameObject: {fileID: 2082915765}
-  GlobalConfigurationGameObject: {fileID: 0}
   OnRoomConfigChanged:
     m_PersistentCalls:
       m_Calls: []
   Room: workshop
   yamlPath: 
+  fileMonitor: {fileID: 458953151}
 --- !u!4 &458953150
 Transform:
   m_ObjectHideFlags: 0
@@ -2666,6 +2666,24 @@ Transform:
   m_Father: {fileID: 1353110235}
   m_RootOrder: -2
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &458953151
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 458953148}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6327fb4d56a7ed2c091bfba182ca213d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  FileName: workshop.yaml
+  Path: 
+  OnFileChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  checkInterval: 2
 --- !u!1 &485988943
 GameObject:
   m_ObjectHideFlags: 0
@@ -7055,7 +7073,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 458953150}
-  - {fileID: 2082915767}
   m_Father: {fileID: 108284563}
   m_RootOrder: -2
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -10898,56 +10915,6 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: -7736421950082849260, guid: 4b75e96f6abe974f4825ef38697268b7, type: 3}
---- !u!1 &2082915765
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 2082915767}
-  - component: {fileID: 2082915766}
-  m_Layer: 0
-  m_Name: RoomFileMonitor
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &2082915766
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2082915765}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6327fb4d56a7ed2c091bfba182ca213d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  ConfigFileName: workshop.yaml
-  ConfigPath: 
-  Interval: 2
-  OnFileChanged:
-    m_PersistentCalls:
-      m_Calls: []
---- !u!4 &2082915767
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2082915765}
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1353110235}
-  m_RootOrder: -2
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &2089445182
 PrefabInstance:
   m_ObjectHideFlags: 0
