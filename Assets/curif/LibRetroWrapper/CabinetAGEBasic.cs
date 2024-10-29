@@ -518,7 +518,7 @@ public class OnLightGunStart : OnLightGunBase
         previousState = state;
     }
 }
-
+         
 public class OnLightGunStay : OnLightGunBase
 {
     public OnLightGunStay(EventInformation eventInformation, BasicVars vars, basicAGE agebasic) :
