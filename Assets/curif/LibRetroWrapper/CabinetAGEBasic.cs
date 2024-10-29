@@ -473,10 +473,12 @@ public class OnCustom : Event
 
     public void ForceTrigger()
     {
+        //custon triggers could be forced before the
+        //event coroutine runs and aren't initialized yet.
+        Init();
         RegisterTrigger(true);
     }
     public override void EvaluateTrigger() {}
-
 }
 
 // -------------------- lightguns ------------------------
