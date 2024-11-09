@@ -141,7 +141,7 @@ public class LibretroScreenController : MonoBehaviour
     public ControlMapConfiguration CabinetControlMapConfig = null;
 
     //age basic
-    public CabinetAGEBasicInformation ageBasicInformation = new();
+    public CabinetAGEBasicInformation ageBasicInformation;
     private CabinetAGEBasic cabinetAGEBasic;
     public BackgroundSoundController backgroundSoundController;
     public GlobalConfiguration globalConfiguration = null;
@@ -454,7 +454,7 @@ public class LibretroScreenController : MonoBehaviour
                   cabinet.PhyActivate();
 
                   // age basic Insert coin
-                  if (ageBasicInformation.active != false)
+                  if (ageBasicInformation != null && ageBasicInformation.active != false)
                       cabinetAGEBasic.ExecInsertCoinBas();
 
                   gameRunning = true;
@@ -599,7 +599,7 @@ public class LibretroScreenController : MonoBehaviour
         libretroControlMap.Clean();
 
         // age basic
-        if (ageBasicInformation.active != false)
+        if (ageBasicInformation != null && ageBasicInformation.active != false)
         {
             cabinetAGEBasic.Stop(); //force
             cabinetAGEBasic.ExecAfterLeaveBas();
