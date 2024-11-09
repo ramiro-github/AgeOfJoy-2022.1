@@ -39,7 +39,7 @@ class CommandFunctionCABPARTSNAME : CommandFunctionSingleExpressionBase
 
         int partNum = (int)val.GetNumber();
 
-        return new BasicValue(config.Cabinet.PartsName(partNum));
+        return new BasicValue(config.Cabinet.PartsName(partNum), forceType: BasicValue.BasicValueType.String);
     }
 }
 
