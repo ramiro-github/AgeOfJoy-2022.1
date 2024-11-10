@@ -42,67 +42,42 @@ public class BasicValue
                 { "/", 5 }
             };
 
-    public BasicValue()
-    {
-        SetValue(0);
-    }
+    // Default constructor sets value to 0
+    public BasicValue() => SetValue(0);
 
-    public BasicValue(double number)
-    {
-        SetValue(number);
-    }
-    public BasicValue(int number)
-    {
-        SetValue((double)number);
-    }
-    public BasicValue(float number)
-    {
-        SetValue((double)number);
-    }
+    // Overloaded constructors for various data types
+    public BasicValue(double number) => SetValue(number);
+    public BasicValue(int number) => SetValue((double)number);
+    public BasicValue(float number) => SetValue((double)number);
+    public BasicValue(bool boolean) => SetValue(boolean ? 1.0 : 0.0);
+    public BasicValue(BasicValue val) => SetValue(val);
 
-
-    public BasicValue(bool boolean)
-    {
-        SetValue(boolean? 1 : 0);
-    }
-
-    public BasicValue(BasicValue val)
-    {
-        SetValue(val);
-    }
-
-    //strings could be surrounded by "
+    // String constructor with optional forced type
     public BasicValue(string str, BasicValueType forceType = BasicValueType.empty)
     {
-        bool startsAndEndsWithQuote = str.StartsWith("\"") && str.EndsWith("\"");
-        if (startsAndEndsWithQuote)
+        if (forceType == BasicValueType.String ||
+            (str.Length >= 2 && str[0] == '"' && str[^1] == '"'))
         {
-            str = str.Substring(1, str.Length - 2);
-            forceType = BasicValueType.String;
-        }
-
-        if (forceType == BasicValueType.String)
-        {
+            if (str.Length >= 2 && str[0] == '"' && str[^1] == '"')
+            {
+                str = str[1..^1]; // More efficient substring removal
+            }
             SetValue(str);
-            return;
         }
-
-        if (str.StartsWith("&"))
+        else if (str.Length > 1 && str[0] == '&') // Hexadecimal format
         {
-            SetValue(FunctionHelper.HexStringToDecimal(str.Substring(1)));
-            return;
+            SetValue(FunctionHelper.HexStringToDecimal(str[1..])); // Efficiently skip '&' character
         }
-
-        if (double.TryParse(str, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double valueDouble))
+        else if (double.TryParse(str, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double value))
         {
-            SetValue(valueDouble);
-            return;
+            SetValue(value);
         }
-
-        SetValue(str);
-
-        return;
+        else
+        {
+            SetValue(str); // Fallback for unquoted non-numeric strings
+        }
     }
+
 
     public BasicValue SetValue(BasicValue val)
     {
