@@ -226,7 +226,9 @@ public class ConfigInformation
         [YamlMember(Alias = "screen-glow-intensity", ApplyNamingConventions = false)]
         public float screenGlowIntensity = screenGlowIntensityDefault;
 
+        [YamlMember(Alias = "world-resolution", ApplyNamingConventions = false)]
         public CabinetConfigurationResolution worldResolution = null;
+        [YamlMember(Alias = "ingame-resolution", ApplyNamingConventions = false)]
         public CabinetConfigurationResolution ingameResolution = null;
 
         public override bool IsValid()
