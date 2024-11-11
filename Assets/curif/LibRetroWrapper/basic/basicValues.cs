@@ -233,10 +233,14 @@ public class BasicValue
 
     public static BasicValue operator +(BasicValue obj1, BasicValue obj2)
     {
-        if (obj1.type != obj2.type)
-            throw new Exception($"Invalid operator + between {obj1.type} and {obj2.type}");
+        if (obj1.type == BasicValueType.Number && obj2.type == BasicValueType.String)
+            obj1.CastTo(BasicValueType.String);
+        else if (obj2.type == BasicValueType.Number && obj1.type == BasicValueType.String)
+            obj2.CastTo(BasicValueType.String);
+        
         if (obj1.type == BasicValueType.String)
-            return new BasicValue(obj1.str + obj2.str);
+            return new BasicValue(obj1.str + obj2.str, forceType: BasicValueType.String);
+        
         return new BasicValue(obj1.number + obj2.number);
     }
 
@@ -253,10 +257,10 @@ public class BasicValue
     {
        
         if (obj1.type == BasicValueType.String && obj2.type == BasicValueType.Number)
-            return new BasicValue(string.Concat(Enumerable.Repeat(obj1.str, (int)obj2.number)));
+            return new BasicValue(string.Concat(Enumerable.Repeat(obj1.str, (int)obj2.number)), forceType: BasicValueType.String);
 
         if (obj1.type == BasicValueType.Number && obj2.type == BasicValueType.String)
-            return new BasicValue(string.Concat(Enumerable.Repeat(obj2.str, (int)obj1.number)));
+            return new BasicValue(string.Concat(Enumerable.Repeat(obj2.str, (int)obj1.number)), forceType: BasicValueType.String);
 
         if (obj1.type == BasicValueType.String)
             throw new Exception("Invalid operation: String cannot be multiplied by another string.");

@@ -121,6 +121,7 @@ public static class Commands
         functions["CABDBCOUNTINROOM"] = typeof(CommandFunctionCABDBCOUNTINROOM);
         //functions["CABDBREPLACE"] = typeof(CommandFunctionCABDBREPLACE);
         functions["CABDBGETNAME"] = typeof(CommandFunctionCABDBGETNAME);
+        functions["CABDBSEARCH"] = typeof(CommandFunctionCABDBSEARCH);
         //functions["CABDBGET"] = typeof(CommandFunctionCABDBGET);
         functions["CABDBDELETE"] = typeof(CommandFunctionCABDBDELETE);
         functions["CABDBADD"] = typeof(CommandFunctionCABDBADD);

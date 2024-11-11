@@ -191,7 +191,7 @@ public class ConfigInformation
     public class CabinetConfigurationResolution
     {
         public float resolution;
-        [YamlMember(Alias = "foveated-evel", ApplyNamingConventions = false)]
+        [YamlMember(Alias = "foveated-level", ApplyNamingConventions = false)]
         public string foveatedLevelAsString;
         public OVRPlugin.FoveatedRenderingLevel foveatedLevel()
         {
@@ -221,8 +221,9 @@ public class ConfigInformation
         public string forcedShader;
         public static readonly string forcedShaderDefault = null;
 
-        [YamlMember(Alias = "screen-glow-intensity", ApplyNamingConventions = false)]
         public static readonly float screenGlowIntensityDefault = 5f;
+
+        [YamlMember(Alias = "screen-glow-intensity", ApplyNamingConventions = false)]
         public float screenGlowIntensity = screenGlowIntensityDefault;
 
         public CabinetConfigurationResolution worldResolution = null;
