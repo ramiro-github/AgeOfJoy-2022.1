@@ -4,7 +4,7 @@ using System.IO;
 
 public class forToStorage
 {
-    public int lineNumber;
+    public double lineNumber;
     public CommandExpression endExpr;
     public CommandExpression stepExpr;
 

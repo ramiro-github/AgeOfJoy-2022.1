@@ -31,7 +31,7 @@ class CommandGOSUB : ICommandBase
         config.Gosub.Push(config.LineNumber);
 
         BasicValue lineNumber = expr.Execute(vars);
-        config.JumpTo = (int)lineNumber.GetValueAsNumber();
+        config.JumpTo = lineNumber.GetValueAsNumber();
 
         return null;
     }

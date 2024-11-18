@@ -9,6 +9,7 @@ class CommandGOTO : ICommandBase
 
     CommandExpression expr;
     ConfigurationCommands config;
+    BasicValue lineNumber = null;
     public CommandGOTO(ConfigurationCommands config)
     {
         this.config = config;
@@ -24,13 +25,19 @@ class CommandGOTO : ICommandBase
     {
         AGEBasicDebug.WriteConsole($"[AGE BASIC RUN {CmdToken}] [{expr}] ");
 
-        BasicValue lineNumber = expr.Execute(vars);
+        if (lineNumber == null)
+            lineNumber = expr.Execute(vars);
 
         config.JumpTo = (int) lineNumber.GetValueAsNumber(); 
 
         // AGEBasicDebug.WriteConsole($"[AGE BASIC RUN {CmdToken}] Jump to {config.JumpTo} ");
 
         return null;
+    }
+
+    public void SetJumpLineNumber(BasicValue lineNo)
+    {
+        lineNumber = lineNo;
     }
 
 }

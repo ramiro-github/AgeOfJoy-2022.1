@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Unity.VisualScripting;
 
 class CommandIFTHEN : ICommandBase
 {
@@ -9,7 +10,7 @@ class CommandIFTHEN : ICommandBase
 
     CommandExpression expr;
 
-    ICommandBase cmd;
+    ICommandBase cmd; //if it is
     ICommandBase cmdElse;
     ConfigurationCommands config;
     public CommandIFTHEN(ConfigurationCommands config)
@@ -35,17 +36,77 @@ class CommandIFTHEN : ICommandBase
         
         tokens++;
         cmd.Parse(tokens);
+        if (tokens.Token == ":")
+        {
+            //is not the only sentence in THEN, add all of them to the program.
+            config.LineNumber += AGEProgram.MinJump; //actual number increment.
+            CommandGOTO goTo = new CommandGOTO(this.config);
+            goTo.SetJumpLineNumber(new BasicValue(config.LineNumber));
+            
+            config.ageProgram.AddCommand(config.LineNumber, cmd); //add the first command of the sentence.
+
+            cmd = goTo;// replace the command to a goto for THEN.
+
+            while (tokens.Token == ":")
+            {
+                tokens++;
+                ICommandBase cmdThen = Commands.GetNew(tokens.Token, config);
+                if (cmdThen == null || cmdThen.Type != CommandType.Type.Command)
+                    throw new Exception($"Syntax error command not found in THEN sentence: {tokens.Token}  line: {(int)config.LineNumber}");
+
+                config.LineNumber += AGEProgram.MinJump; //actual number increment.
+                config.ageProgram.AddCommand(config.LineNumber, cmdThen);
+
+                cmdThen.Parse(++tokens);
+            }
+            AddGoToNextUserLine();
+        }
 
         if (tokens.Token.ToUpper() == "ELSE")
         {
+
             cmdElse = Commands.GetNew(tokens.Next(), config);
             if (cmd == null)
                 throw new Exception($"Syntax error command not found in ELSE clause: {tokens.ToString()}");
+            
             tokens++;
             cmdElse.Parse(tokens);
+            if (tokens.Token == ":")
+            {
+                //is not the only sentence in THEN, add all of them to the program.
+                config.LineNumber += AGEProgram.MinJump; //actual number increment.
+                CommandGOTO goTo = new CommandGOTO(this.config);
+                goTo.SetJumpLineNumber(new BasicValue(config.LineNumber));
+
+                config.ageProgram.AddCommand(config.LineNumber, cmdElse); //add the first command of the sentence.
+
+                cmdElse = goTo;// replace the command to a goto for ELSE.
+
+                while (tokens.Token == ":")
+                {
+                    tokens++;
+                    ICommandBase cmdElse = Commands.GetNew(tokens.Token, config);
+                    if (cmdElse == null || cmdElse.Type != CommandType.Type.Command)
+                        throw new Exception($"Syntax error command not found in ELSE sentence: {tokens.Token}  line: {(int)config.LineNumber}");
+
+                    config.LineNumber += AGEProgram.MinJump; //actual number increment.
+                    config.ageProgram.AddCommand(config.LineNumber, cmdElse);
+
+                    cmdElse.Parse(++tokens);
+                }
+                AddGoToNextUserLine();
+
+            }
         }
 
         return true;
+    }
+    private void AddGoToNextUserLine()
+    {
+        CommandGOTO goTo = new CommandGOTO(this.config);
+        goTo.SetJumpLineNumber(new BasicValue((int)config.LineNumber + 1));
+        config.LineNumber += AGEProgram.MinJump; //actual number increment.
+        config.ageProgram.AddCommand(config.LineNumber, goTo);
     }
 
     public BasicValue Execute(BasicVars vars)
