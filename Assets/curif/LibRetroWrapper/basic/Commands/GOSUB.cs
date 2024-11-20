@@ -26,7 +26,7 @@ class CommandGOSUB : ICommandBase
 
     public BasicValue Execute(BasicVars vars)
     {
-        AGEBasicDebug.WriteConsole($"[AGE BASIC RUN {CmdToken}] [{expr}] ");
+        AGEBasicDebug.WriteConsole($"[AGE BASIC RUN #{config.LineNumber}  {CmdToken}] [{expr}] ");
 
         config.Gosub.Push(config.LineNumber);
 

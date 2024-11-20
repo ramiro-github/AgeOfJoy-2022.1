@@ -298,6 +298,8 @@ public class AGEProgram
 
     public void AddCommand(double lineNo, ICommandBase command)
     {
+        if (lines.ContainsKey(lineNo))
+            throw new Exception($"Line number ({lineNo}) already exists.");
         lines.Add(lineNo, command);
     }
 

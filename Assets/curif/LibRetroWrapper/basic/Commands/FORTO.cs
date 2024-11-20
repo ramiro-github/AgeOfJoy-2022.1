@@ -61,10 +61,10 @@ class CommandFORTO : ICommandBase
 
     public BasicValue Execute(BasicVars vars)
     {
-        AGEBasicDebug.WriteConsole($"[AGE BASIC {CmdToken}]");
+        AGEBasicDebug.WriteConsole($"[AGE BASIC  #{config.LineNumber} {CmdToken}]");
 
         BasicValue startVal = new(expr.Execute(vars));
-        FunctionHelper.ExpectedNumber(startVal, "- FOR must have an expression or number");
+        FunctionHelper.ExpectedNumber(startVal, "- FOR must be an expression or number");
 
         vars.SetValue(var, startVal);
 
