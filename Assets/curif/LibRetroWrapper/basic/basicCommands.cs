@@ -87,7 +87,8 @@ public static class Commands
         functions["FILEEOF"] = typeof(CommandFunctionFILEEOF);
         functions["FILEWRITE"] = typeof(CommandFunctionFILEWRITE);
         functions["FILEEXISTS"] = typeof(CommandFunctionFILEEXIST);
-        
+        functions["FILEDELETE"] = typeof(CommandFunctionFILEDELETE);
+
         //introspection
         functions["EXISTS"] = typeof(CommandFunctionEXIST);
         functions["TYPE"] = typeof(CommandFunctionTYPE);
