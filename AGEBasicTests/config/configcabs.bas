@@ -1,11 +1,12 @@
-5 call DebugMode(1)
 
 10 SETCOLORSPACE "zx"
 20 LET cabRoomPos = 0
 40 LETS cabsCount, cabsDBCount = CabRoomCount(), CabDBCount()
 50 LETS width, height = ScreenWidth(), ScreenHeight()
 60 LET lineEmpty = width * " "
-70 LETS dic, pos, cabToSearch, changed = "#0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0, "", 0
+70 LETS dicMember, pos, cabToSearch, changed = 0, 0, "", 0
+75 LETS dic, dicMatrix1, dicMatrix2, dicMatrix3, dicMatrix4 = 
+     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", "012345678","9ABCDEFGH","IJKLMNOPQ","RSTUVWXYZ"
 80 LETS dicPos, funct, cursor = 0,0,0 '0 = select room pos, 1=select dic letter, 2=select cab, 3=assing
 90 LETS cabList, matrixcol, matrixrow, matrixidx = "", 0, 0, 0
 100 LET cpuspeed = GetCPU()
@@ -13,50 +14,47 @@
 
 200 ' init screen
 210 CLS
-220 FGCOLOR "blue"
-230 PRINTLN "Room cabinet configuration " + RoomName()
-240 RESETCOLOR
+220 FGCOLOR "blue" : PRINTLN "Room cabinet configuration " + RoomName() : RESETCOLOR
 250 GOSUB 5200
 260 GOSUB 5500
 270 GOSUB 9000
 
-1010 IF funct = 0 THEN GOSUB 2000
-     ELSE IF funct = 1 THEN GOSUB 2050
-     ELSE IF funct = 2 THEN GOSUB 2100
-1020 SLEEP 0.1
-1040 GOTO 1010
-
 2000 IF ControlActive("JOYPAD_RIGHT") THEN LET CabRoomPos = CabRoomPos + IIF(cabRoomPos < cabsCount - 1, 1, 0)
      ELSE IF ControlActive("JOYPAD_LEFT") THEN LET CabRoomPos = CabRoomPos + IIF(cabRoomPos > 0, -1, 0)
-     ELSE IF ControlActive("JOYPAD_DOWN") THEN GOSUB 9050
+     ELSE IF ControlActive("JOYPAD_DOWN") THEN GOSUB 9050 : GOTO 2050
      ELSE IF ControlActive("JOYPAD_Y") THEN END
 2010 GOSUB 5200
-2020 RETURN
+2020 SLEEP 0.1
+2030 GOTO 2000
 
-
-2050 IF ControlActive("JOYPAD_RIGHT") THEN LET dicPos = dicPos + IIF(dicPos < 36, 1, 0)
-     ELSE IF ControlActive("JOYPAD_LEFT") THEN LET dicPos = dicPos + IIF(dicPos > 0, -1, 0)
-     ELSE IF ControlActive("JOYPAD_B") THEN LETS cabToSearch, changed = cabToSearch + SUBSTR(dic, dicPos, 1), 1
-     ELSE IF ControlActive("JOYPAD_A") THEN LETS cabToSearch, changed = "", 1
-     ELSE IF AND(ControlActive("JOYPAD_X"), cabToSearch != "") 
-          THEN LETS cabToSearch, changed = SUBSTR(cabToSearch, 0, LEN(cabToSearch) - 1), 1
-     ELSE IF ControlActive("JOYPAD_UP") THEN GOSUB 9000
-     ELSE IF ControlActive("JOYPAD_DOWN") THEN GOSUB 9100
+2050 LETS left, right = ControlActive("JOYPAD_LEFT"), ControlActive("JOYPAD_RIGHT") 
+2053 IF right THEN LET dicPos = dicPos + IIF(dicPos < 36, 1, 0)
+     ELSE IF left THEN LET dicPos = dicPos - IIF(dicPos > 0, 1, 0)
+     ELSE IF ControlActive("JOYPAD_B") THEN LET cabToSearch = cabToSearch + SUBSTR(dic, dicPos, 1) : GOSUB 6000
+     ELSE IF ControlActive("JOYPAD_A") THEN LET cabToSearch = "" : GOSUB 6000
+     ELSE IF AND(ControlActive("JOYPAD_X"), cabToSearch != "")
+          THEN LET cabToSearch = SUBSTR(cabToSearch, 0, LEN(cabToSearch) - 1) : GOSUB 6000
      ELSE IF ControlActive("JOYPAD_Y") THEN END
-2060 GOSUB 5500
-2070 GOSUB 6000
-2080 RETURN
 
-2100 IF ControlActive("JOYPAD_UP") THEN GOTO 2130
+2055 LETS up, down = ControlActive("JOYPAD_UP"), ControlActive("JOYPAD_DOWN")
+2058 IF AND(dicPos<9, up) THEN LET cursor = 1 : GOSUB 5550 : GOSUB 9000 : GOTO 2000
+     ELSE IF AND(dicPos>26, down) THEN LET cursor = 1 : GOSUB 5550 : GOSUB 9100 : GOTO 2100
+     ELSE IF up THEN LET dicPos = dicPos - 9
+     ELSE IF down THEN LET dicPos = dicPos + 9
+
+2060 IF OR(left, right, up, down) THEN GOSUB 5500
+2070 LET cursor = 1 - cursor : GOSUB 5550
+2080 SLEEP 0.1
+2090 GOTO 2050
+
+2100 IF ControlActive("JOYPAD_UP") THEN LET cursor = 1 : GOSUB 7000 : GOSUB 9050 : GOTO 2050
      ELSE IF ControlActive("JOYPAD_RIGHT") THEN GOSUB 7500
      ELSE IF ControlActive("JOYPAD_LEFT") THEN GOSUB 7600
      ELSE IF ControlActive("JOYPAD_Y") THEN END
      ELSE IF ControlActive("JOYPAD_B") THEN GOSUB 9500
-2110 GOSUB 7000
-2120 RETURN
-2130 GOSUB 8050
-2140 GOSUB 9050
-2150 RETURN
+2110 LET cursor = 1 - cursor: GOSUB 7000
+2120 SLEEP 0.1
+2130 GOTO 2100
 
 5200 REM SHOW ACTUAL CABINET TO CHANGE
 5210 LET lineCabNum = "CAB #" + STR(cabRoomPos) + ":"
@@ -67,28 +65,33 @@
 5270 SHOW
 5280 RETURN
 
-5500 REM SHOW CAB TO SEARCH
-5510 PRINT 0, 2, dic, 0, 0
-5520 PRINT dicPos, 2, SUBSTR(dic, dicPos, 1), cursor, 0
-5530 LET cursor = 1 - cursor
-5540 PRINT 0, 3, lineEmpty, 0, 0
-5550 PRINT 0, 3, "Search for: " + cabToSearch, 0, 0
-5570 SHOW
-5580 RETURN
+5500 REM SHOW CAB TO SEARCH MATRIX
+5510 FGCOLOR "WHITE" : BGCOLOR "magenta"
+5520 PRINT 0,2, dicMatrix1, 0, 0 :
+     PRINT 0,3, dicMatrix2, 0, 0 :
+     PRINT 0,4, dicMatrix3, 0, 0 :
+     PRINT 0,5, dicMatrix4, 0, 0
+5530 RESETCOLOR
+5540 RETURN
+
+5549 REM Show matrix letter (cursor)
+5550 LETS row, col = INT(dicPos/9), MOD(dicPos, 9)
+5560 PRINT col, row+2, SUBSTR(dic, dicPos, 1), cursor
+5570 RETURN
 
 6000 REM SHOW CABS
-6010 IF NOT(changed) THEN RETURN
-6020 IF cabToSearch != "" THEN GOTO 6040
-6030 GOSUB 6500
-6032 SHOW
-6034 LET changed = 0
-6036 RETURN
-
+6010 IF cabToSearch != "" THEN GOTO 6040
+6020 GOSUB 6500
+6030 PRINT 11, 3, " " * (width - 11), 0, 0
+6034 SHOW
+6038 RETURN
 
 6040 CALL SetCPU(100)
 6050 LET cabList = CabDBSearch(cabToSearch, "|")
 6060 GOSUB 6500
-6070 LETS y, col = 5, 0
+6064 PRINT 11, 3, " " * (width - 19 - LEN(cabToSearch)), 0, 0
+6065 PRINT 11, 3, "Search: " + cabToSearch , 0, 0
+6070 LETS y, col = 7, 0
 6080 FOR idx = 0 to CountMembers(cabList, "|") - 1
 6090   PRINT col * columnWidth, y, SUBSTR(GetMember(cabList, idx, "|"), 0, columnWidth - 1) , 0, 0
 6100   let col = col + 1
@@ -98,25 +101,24 @@
 6140   IF y > height THEN GOTO 6160
 6150 NEXT idx
 6160 SHOW
-6170 LET changed = 0
 6180 LETS matrixidx, matrixcol, matrixrow = 0,0,0
-6190 GOSUB 7000
+6190 LET cursor = 1 : GOSUB 7000
 6200 CALL SetCPU(cpuspeed)
 6210 RETURN
 
 6500 REM Clean area
-6510 FOR scr = 5 to height - 2
+6510 FOR scr = 7 to height - 2
 6520   PRINT 0, scr, lineEmpty, 0, 0
 6530 NEXT scr
 6540 RETURN
 
 7000 REM show selected cabinet in matrix
-7010 LET cursor = 1 - cursor
-7020 PRINT matrixcol * columnWidth, 5 + matrixrow,  SUBSTR(GetMember(cabList, matrixidx, "|"), 0, columnWidth - 1), cursor
+7020 PRINT matrixcol * columnWidth, 7 + matrixrow,  
+     SUBSTR(GetMember(cabList, matrixidx, "|"), 0, columnWidth - 1), cursor
 7030 RETURN
 
 7500 REM next cabinet in matrix
-7510 GOSUB 8000
+7510 LET cursor = 0 : GOSUB 7000
 7520 LET members = CountMembers(cabList, "|")
 7530 IF matrixidx = members - 1 THEN RETURN
 7540 LETS matrixidx, matrixcol = matrixidx + 1, matrixcol + 1
@@ -125,21 +127,15 @@
 7580 RETURN
 
 7600 REM previous cabinet in matrix
-7610 GOSUB 8000
+7610 LET cursor = 0 : GOSUB 7000
 7620 LETS matrixidx, matrixcol = matrixidx - 1, matrixcol - 1
-7630 IF matrixidx < 0 THEN GOTO 7680 
+7630 IF matrixidx < 0 THEN LETS matrixidx, matrixcol, matrixrow = 0,0,0 : 
+                           LET cursor = 1 : GOSUB 7000
+                           RETURN 
 7650 IF matrixcol < 0 THEN LETS matrixcol, matrixrow = 3, matrixrow - 1
 7660 IF matrixrow < 0 THEN LET matrixrow = 0
 7670 RETURN
-7680 LETS matrixidx, matrixcol, matrixrow = 0,0,0
-7690 RETURN
 
-8000 REM show selected in matrix as unselected cursor
-8020 PRINT matrixcol * columnWidth, 5 + matrixrow,  SUBSTR(GetMember(cabList, matrixidx, "|"), 0, columnWidth - 1), 0
-8030 RETURN
-8050 REM show selected in matrix as selected cursor
-8060 PRINT matrixcol * columnWidth, 5 + matrixrow,  SUBSTR(GetMember(cabList, matrixidx, "|"), 0, columnWidth - 1), 1
-8070 RETURN
 
 9000 REM change to cabinet position selection
 9010 LET funct = 0
@@ -153,9 +149,9 @@
 9110 LET funct = 2
 9120 LET helpMessage = " \235 \236, B:ASSIGN, \233 PREV, Y:END"
 9130 GOTO 9160
+
 9160 REM print help line
-9170 FGCOLOR "WHITE"
-9180 BGCOLOR "BLUE"
+9170 FGCOLOR "WHITE" : BGCOLOR "BLUE"
 9190 PRINT 0, height - 1, lineEmpty, 0, 0
 9200 PRINT 0, height - 1, helpMessage, 0, 0
 9210 RESETCOLOR
@@ -170,8 +166,7 @@
 9530 PRINT 3, 12, "CABINET POSITION #" + STR(cabRoomPos), 0, 0
 9540 PRINT 3, 13, "BY CABINET:", 0, 0
 9550 PRINT 3, 14, GetMember(cabList, matrixidx, "|"), 0, 0
-9560 FGCOLOR "WHITE"
-9570 BGCOLOR "red"
+9560 FGCOLOR "WHITE" : BGCOLOR "red"
 9580 PRINT 3, 16, " B: REPLACE ", 0, 0
 9590 RESETCOLOR
 9600 PRINT 15, 16, " X: CANCEL", 0, 0
