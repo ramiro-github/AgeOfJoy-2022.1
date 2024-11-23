@@ -151,6 +151,7 @@ public class LibretroScreenController : MonoBehaviour
     private bool gameRunning = false;
     private bool playerInTheZone = false;
     private float distanceToPlayer;
+    private bool screenLightON = false;
 
     private CoinSlotController getCoinSlotController()
     {
@@ -251,6 +252,7 @@ public class LibretroScreenController : MonoBehaviour
 
         // glow light
         light = GetComponentInChildren<Light>(true);
+        screenLightON = light != null && globalConfiguration.Configuration.cabinet.screenGlowIntensity > 0;
 
         mainCoroutine = StartCoroutine(runBT());
         initialized = true;
@@ -332,10 +334,9 @@ public class LibretroScreenController : MonoBehaviour
                   {
                       videoPlayer.Pause();
                       audioPlayer.Stop();
-                      if (light != null)
-                      {
+                   
+                      if (screenLightON)
                           light.gameObject.SetActive(true);
-                      }
                   }
 
                   //start mame
@@ -640,7 +641,7 @@ public class LibretroScreenController : MonoBehaviour
 
         if (LibretroMameCore.isRunning(ScreenName, GameFile))
         {
-            if (light != null && globalConfiguration.Configuration.cabinet.screenGlowIntensity > 0)
+            if (screenLightON)
             {
                 float r, g, b;
 
