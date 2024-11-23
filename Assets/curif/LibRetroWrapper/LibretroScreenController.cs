@@ -502,7 +502,7 @@ public class LibretroScreenController : MonoBehaviour
               {
                   EventManager.Instance.StopExitGameSound();
                   ExitPlayerFromGame();
-                  if (light != null)
+                  if (screenLightON)
                   {
                       light.gameObject.SetActive(false);
                   }
