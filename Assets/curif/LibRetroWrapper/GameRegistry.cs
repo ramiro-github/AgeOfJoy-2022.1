@@ -369,17 +369,17 @@ public class GameRegistry : MonoBehaviour
         foreach (string dir in cabinetDirectories)
         {
             // Special case: if val is "#", include all entries less than "0"
-            if (val == "#" && string.Compare(dir, "0", StringComparison.OrdinalIgnoreCase) < 0)
+            if (val == "0" && string.Compare(dir, "0", StringComparison.OrdinalIgnoreCase) < 0)
             {
                 result.Add(dir);
             }
             // Regular case: match entries that start with the prefix val
-            else if (val != "#" && dir.StartsWith(val, StringComparison.OrdinalIgnoreCase))
+            else if (val != "0" && dir.StartsWith(val, StringComparison.OrdinalIgnoreCase))
             {
                 result.Add(dir);
             }
             // Early termination: if sorted order ensures no further matches
-            else if (val != "#" && string.Compare(dir, val, StringComparison.OrdinalIgnoreCase) > 0)
+            else if (val != "0" && string.Compare(dir, val, StringComparison.OrdinalIgnoreCase) > 0)
             {
                 break;
             }

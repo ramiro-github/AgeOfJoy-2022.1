@@ -221,7 +221,7 @@ public class ConfigInformation
         public string forcedShader;
         public static readonly string forcedShaderDefault = null;
 
-        public static readonly float screenGlowIntensityDefault = 5f;
+        public static readonly float screenGlowIntensityDefault = 0f;
 
         [YamlMember(Alias = "screen-glow-intensity", ApplyNamingConventions = false)]
         public float screenGlowIntensity = screenGlowIntensityDefault;
@@ -271,7 +271,7 @@ public class ConfigInformation
         CabinetConfiguration cabinetConfiguration = new CabinetConfiguration();
         //cabinetConfiguration.insertCoinOnStartup = true;
         cabinetConfiguration.forcedShader = null;
-        cabinetConfiguration.screenGlowIntensity = 5f;
+        cabinetConfiguration.screenGlowIntensity = CabinetConfiguration.screenGlowIntensityDefault;
         return cabinetConfiguration;
     }
 
