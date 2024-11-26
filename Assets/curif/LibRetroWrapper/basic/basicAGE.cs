@@ -517,7 +517,7 @@ public class basicAGE : MonoBehaviour
         catch (Exception e)
         {
             string strerror = errorMessage(running, e);
-            ConfigManager.WriteConsoleError($"[BasicAGE.RunALine] {strerror}");
+            ConfigManager.WriteConsoleError($"[BasicAGE.RunALine] {strerror} \n {e.StackTrace}");
             LastRuntimeException = new(running.Name, (int)configCommands.LineNumber, e.Message, e);
             configCommands.CloseFiles();
             return false;

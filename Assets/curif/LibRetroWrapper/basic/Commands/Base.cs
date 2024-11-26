@@ -15,8 +15,6 @@ public interface ICommandBase
 public interface ICommandList
 {
 
-    int MaxAllowed { get; }
-
     BasicValue[] ExecuteList(BasicVars vars);
 }
 

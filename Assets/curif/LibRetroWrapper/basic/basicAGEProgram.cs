@@ -8,6 +8,8 @@ public class AGEProgram
 {
     private string name;
     SortedDictionary<double, ICommandBase> lines = new();
+    private IEnumerator<KeyValuePair<double, ICommandBase>> enumerator;
+
     double nextLineToExecute = -1;
     int lastLineNumberParsed = -1;
     BasicVars vars = new();
@@ -27,14 +29,27 @@ public class AGEProgram
 
     private KeyValuePair<double, ICommandBase> getNext()
     {
-        // Find the first element with a key >= nextLineToExecute
-        foreach (var kvp in lines)
+        if (nextLineToExecute >= 0)
         {
-            if (kvp.Key >= nextLineToExecute)
-                return kvp;
+            IEnumerator<KeyValuePair<double, ICommandBase>> etor = lines.GetEnumerator();
+            while (etor.MoveNext())
+            {
+                if (etor.Current.Key >= nextLineToExecute)
+                {
+                    nextLineToExecute = -1; // Reset the flag
+                    enumerator = etor;
+                    return etor.Current;
+                }
+            }
+            return default;
         }
 
-        // Return an empty KeyValuePair if no match is found
+        if (enumerator == null) enumerator = lines.GetEnumerator();
+
+        if (enumerator.MoveNext())
+            return enumerator.Current;
+        
+        // Return an empty KeyValuePair if reach the end.
         return default;
     }
 
@@ -91,7 +106,7 @@ public class AGEProgram
             throw new Exception("program has reached the maximum execution lines available.");
         }
 
-        KeyValuePair<double, ICommandBase> cmd = getNext(); ;
+        KeyValuePair<double, ICommandBase> cmd = getNext();
         ICommandBase commandToExecute = cmd.Value;
 
         if (commandToExecute != null) // empty or REM line.
@@ -132,7 +147,7 @@ public class AGEProgram
             }
         }
 
-        nextLineToExecute = cmd.Key + MinJump;
+        //nextLineToExecute = cmd.Key + MinJump;
         return true;
     }
 
