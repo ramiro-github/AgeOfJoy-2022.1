@@ -328,17 +328,13 @@ public class basicAGE : MonoBehaviour
 
     }
 
-    public void Run(string programName, bool blocking = false, BasicVars pvars = null,
+    public void Run(string programName, BasicVars pvars = null,
                         int maxExecutionLinesAllowed = 10000)
     {
         PrepareToRun(programName, pvars, maxExecutionLinesAllowed);
 
-        if (!blocking)
-        {
-            runningProgramCoroutine = StartCoroutine(runProgram());
-            return;
-        }
-
+        runningProgramCoroutine = StartCoroutine(runProgram());
+        /*
         OnProgramStarted.Invoke(running.Name);
         bool moreLines = true;
         while (moreLines)
@@ -357,6 +353,7 @@ public class basicAGE : MonoBehaviour
         ConfigManager.WriteConsole($"[BasicAGE.Run] {running.Name} ENDED. {running.ContLinesExecuted} lines executed. ERROR: {LastRuntimeException}");
 
         return;
+        */
     }
 
     public void PrepareToRun(string name, BasicVars pvars, int maxExecutionLinesAllowed = 0, int lineNumber = 0)
@@ -427,107 +424,102 @@ public class basicAGE : MonoBehaviour
     // run a complete program in a coroutine
     IEnumerator runProgram()
     {
-        string runningProgram = running.Name;
-        OnProgramStarted.Invoke(runningProgram);
-
-        InitComponents();
+        PreRunTasks();
 
         ConfigManager.WriteConsole($"[BasicAGE.runProgram] START {running.Name}");
 
         bool moreLines = true;
-        Status = ProgramStatus.Running;
-        YieldInstruction yield;
         while (moreLines)
         {
-            yield = runNextLineCurrentProgram(ref moreLines);
-            yield return yield;
+            yield return runNextLineCurrentProgram(ref moreLines);
         }
-        configCommands.CloseFiles();
-        OnProgramEnded.Invoke(runningProgram);
 
+        PostRunTasks();
+        
         yield break;
+    }
+
+    // to run inmediatly before a program runs
+    public void PreRunTasks()
+    {
+        InitComponents();
+        string runningProgram = running.Name;
+        OnProgramStarted.Invoke(runningProgram);
+
+        Status = ProgramStatus.Running;
+
+    }
+
+    // to run inmediatly after a program runs
+    public void PostRunTasks()
+    {
+        configCommands.CloseFiles();
+        OnProgramEnded.Invoke(running.Name);
+        running = null;
     }
 
     //run just one line of the current loaded program
     public YieldInstruction runNextLineCurrentProgram(ref bool moreLines)
     {
-        Status = ProgramStatus.Running;
-
-        YieldInstruction yield = RunAndYield(ref moreLines);
-        if (!moreLines)
-        {
-            if (configCommands.DebugMode)
-                SaveDebug(running.Name, compEx: null, runEx: LastRuntimeException);
-
-            ConfigManager.WriteConsole($"[BasicAGE.runNextLineCurrentProgram] {running.Name} END. {running.ContLinesExecuted} lines executed. ERROR: {LastRuntimeException}");
-            running = null;
-            if (LastRuntimeException != null)
-                Status = ProgramStatus.CancelledWithError;
-            else
-                Status = ProgramStatus.Finished;
-            return null;
-        }
-        return yield;
-    }
-
-    //run the line and calculate de delay (sleep)
-    public YieldInstruction RunAndYield(ref bool moreLines)
-    {
-        moreLines = RunALine();
-        if (!moreLines)
-            return null;
-
-        YieldInstruction delay;
-        if (configCommands.SleepTime > 0)
-        {
-            delay = new WaitForSeconds(configCommands.SleepTime);
-            configCommands.SleepTime = 0;
-        }
-        else if (cpuPercentage != configCommands.cpuPercentage)
-        {
-            //user changes cpu control
-            cpuPercentage = configCommands.cpuPercentage;
-            if (cpuPercentage == 100)
-            {
-                calculatedDelay = 0;
-                delay = null;
-            }
-            else
-            {
-                calculatedDelay = CalculateDelay(cpuPercentage);
-                delay = new WaitForSeconds(calculatedDelay);
-            }
-            //ConfigManager.WriteConsole($"[BasicAGE.runProgram] {running.Name} cpu: {cpuPercentage}% delay: {calculatedDelay} secs");
-        }
-        else
-        {
-            delay = new WaitForSeconds(calculatedDelay);
-        }
-
-        return delay;
-    }
-
-    //run a line of an started program
-    public bool RunALine()
-    {
         try
         {
-            return running.runNextLine();
+            moreLines = running.runNextLine();
         }
         catch (Exception e)
         {
             string strerror = errorMessage(running, e);
             ConfigManager.WriteConsoleError($"[BasicAGE.RunALine] {strerror} \n {e.StackTrace}");
             LastRuntimeException = new(running.Name, (int)configCommands.LineNumber, e.Message, e);
-            configCommands.CloseFiles();
-            return false;
+            moreLines = false;
         }
+
+        if (!moreLines)
+        {
+            if (configCommands.DebugMode)
+                SaveDebug(running.Name, compEx: null, runEx: LastRuntimeException);
+
+            ConfigManager.WriteConsole($"[BasicAGE.runNextLineCurrentProgram] {running.Name} END. {running.ContLinesExecuted} lines executed. ERROR: {LastRuntimeException}");
+
+            if (LastRuntimeException != null)
+                Status = ProgramStatus.CancelledWithError;
+            else
+                Status = ProgramStatus.Finished;
+            
+            return null;
+        }
+
+        if (configCommands.SleepTime > 0)
+        {
+            YieldInstruction delay = new WaitForSeconds(configCommands.SleepTime);
+            configCommands.SleepTime = 0;
+            return delay;
+        }
+
+        if (cpuPercentage != configCommands.cpuPercentage)
+        {
+            //user changes cpu control
+            cpuPercentage = configCommands.cpuPercentage;
+            if (cpuPercentage == 100)
+            {
+                calculatedDelay = 0;
+                return null;
+            }
+            else
+            {
+                calculatedDelay = CalculateDelay(cpuPercentage);
+                return new WaitForSeconds(calculatedDelay);
+            }
+            //ConfigManager.WriteConsole($"[BasicAGE.runProgram] {running.Name} cpu: {cpuPercentage}% delay: {calculatedDelay} secs");
+        }
+
+        return new WaitForSeconds(calculatedDelay);
     }
+
 
 #if UNITY_EDITOR
     public void ExecuteInEditorMode()
     {
-        Run(nameToExecute, false);
+        Run(nameToExecute);
 
         AGEProgram program = programs[nameToExecute];
         if (program.Vars.Exists("ERROR"))
@@ -570,6 +562,7 @@ public class basicAGE : MonoBehaviour
     {
         ParseFile(path + "\\" + nameToExecute);
     }
+    /*
     public void RunTests()
     {
         ParseFiles(path);
@@ -592,6 +585,7 @@ public class basicAGE : MonoBehaviour
         
         ConfigManager.WriteConsole($"[RunTests] END");
     }
+    */
 #endif
 }
 
@@ -624,10 +618,6 @@ public class basicAGEEditor : Editor
         if(GUILayout.Button("Last LOG"))
         {
           myScript.Log();
-        }
-        if(GUILayout.Button("Run tests in Path"))
-        {
-          myScript.RunTests();
         }
         if(GUILayout.Button("Stop"))
         {
