@@ -360,7 +360,7 @@ public class basicAGE : MonoBehaviour
     {
         InitComponents();
 
-        ConfigManager.WriteConsole($"[BasicAGE.Run] starting {name} goto line: {lineNumber}.");
+        ConfigManager.WriteConsole($"[BasicAGE.PrepareToRun] starting {name} goto line: {lineNumber}.");
 
         Status = ProgramStatus.WaitingForStart;
 
@@ -443,8 +443,7 @@ public class basicAGE : MonoBehaviour
     public void PreRunTasks()
     {
         InitComponents();
-        string runningProgram = running.Name;
-        OnProgramStarted.Invoke(runningProgram);
+        OnProgramStarted.Invoke(running.Name);
 
         Status = ProgramStatus.Running;
 
@@ -468,7 +467,7 @@ public class basicAGE : MonoBehaviour
         catch (Exception e)
         {
             string strerror = errorMessage(running, e);
-            ConfigManager.WriteConsoleError($"[BasicAGE.RunALine] {strerror} \n {e.StackTrace}");
+            ConfigManager.WriteConsoleError($"[BasicAGE.RunALine] #{configCommands.LineNumber} {strerror} \n {e.StackTrace}");
             LastRuntimeException = new(running.Name, (int)configCommands.LineNumber, e.Message, e);
             moreLines = false;
         }
@@ -478,7 +477,7 @@ public class basicAGE : MonoBehaviour
             if (configCommands.DebugMode)
                 SaveDebug(running.Name, compEx: null, runEx: LastRuntimeException);
 
-            ConfigManager.WriteConsole($"[BasicAGE.runNextLineCurrentProgram] {running.Name} END. {running.ContLinesExecuted} lines executed. ERROR: {LastRuntimeException}");
+            ConfigManager.WriteConsole($"[BasicAGE.runNextLineCurrentProgram] {running.Name} #{configCommands.LineNumber} no more lines or END. {running.ContLinesExecuted} lines executed. ERROR: {LastRuntimeException}");
 
             if (LastRuntimeException != null)
                 Status = ProgramStatus.CancelledWithError;

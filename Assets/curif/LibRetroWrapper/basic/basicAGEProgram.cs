@@ -62,6 +62,8 @@ public class AGEProgram
     public void PrepareToRun(BasicVars pvars = null, int lineNumber = 0)
     {
         this.nextLineToExecute = lineNumber - 1;
+        this.enumerator = null;
+
         config.Gosub = new Stack<double>();
         config.LineNumber = 0;
         config.JumpNextTo = 0;
@@ -117,16 +119,15 @@ public class AGEProgram
         config.LineNumber = cmd.Key;
 
         cmd.Value.Execute(vars);
-
-        if (tracker == null)
-            tracker = new();
-        tracker.ExecuteLine();
-
         if (config.stop)
         {
             ConfigManager.WriteConsole($"[AGEProgram.runNextLine] {name} stopped by config.stop after exec line");
             return false;
         }
+
+        if (tracker == null)
+            tracker = new();
+        tracker.ExecuteLine();
 
         if (config.JumpTo != 0) //exactly
         {
@@ -138,7 +139,8 @@ public class AGEProgram
             config.JumpTo = 0;
             return true;
         }
-        else if (config.JumpNextTo != 0) //next one.
+        
+        if (config.JumpNextTo != 0) //next one.
         {
             // ConfigManager.WriteConsole($"[AGEProgram.runNextLine] jump to line >= {config.JumpNextTo}");
             nextLineToExecute = config.JumpNextTo + MinJump;
@@ -146,8 +148,7 @@ public class AGEProgram
             return true;
         }
 
-        //nextLineToExecute = cmd.Key + MinJump;
-        return true;
+        return true; 
     }
 
     public string Log()

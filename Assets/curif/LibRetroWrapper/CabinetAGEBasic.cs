@@ -1005,7 +1005,6 @@ public class CabinetAGEBasic : MonoBehaviour
                     bool moreLines = true;
                     while (moreLines)
                     {
-                        YieldInstruction yield;
                         // Run the event's program
                         // excptions are catched internally
                         yield return evt.RunALine(ref moreLines);
