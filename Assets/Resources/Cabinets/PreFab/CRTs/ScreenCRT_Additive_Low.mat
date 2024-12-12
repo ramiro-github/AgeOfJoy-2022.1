@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: ScreenCRT_Additive_Low
-  m_Shader: {fileID: 4800000, guid: f77cdcb250896d54a957bf5d326b39db, type: 3}
+  m_Shader: {fileID: 4800000, guid: e6a126818f74ee643a90c3cb1dfa13e5, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
