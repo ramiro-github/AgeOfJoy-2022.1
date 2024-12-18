@@ -17,6 +17,7 @@ TagManager:
   - backgroundsound
   - screenControlCabinet
   - payphoneHandset
+  - ear
   layers:
   - Default
   - TransparentFX
@@ -36,8 +37,8 @@ TagManager:
   - LightGunTarget
   - InteractablePart
   - PayphoneHandset
-  - 
-  - 
+  - PayphoneCabin
+  - Hand
   - 
   - 
   - 

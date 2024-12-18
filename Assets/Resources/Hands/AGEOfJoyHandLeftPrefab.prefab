@@ -602,7 +602,7 @@ GameObject:
   m_Component:
   - component: {fileID: 3911881498074841863}
   - component: {fileID: 5420076474256706298}
-  m_Layer: 0
+  m_Layer: 19
   m_Name: hands:Lhand
   m_TagString: Untagged
   m_Icon: {fileID: 0}

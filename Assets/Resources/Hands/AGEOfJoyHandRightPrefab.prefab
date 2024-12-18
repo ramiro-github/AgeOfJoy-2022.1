@@ -2392,7 +2392,7 @@ GameObject:
   m_Component:
   - component: {fileID: 7841760237353135472}
   - component: {fileID: 7866455786409388466}
-  m_Layer: 0
+  m_Layer: 19
   m_Name: hands:Rhand
   m_TagString: Untagged
   m_Icon: {fileID: 0}
