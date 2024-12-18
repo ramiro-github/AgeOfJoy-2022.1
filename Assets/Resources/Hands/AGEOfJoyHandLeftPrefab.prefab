@@ -2031,6 +2031,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   lightMaterial: {fileID: 2100000, guid: 2a4e7c46e1406141bbc88455a0b0fb9b, type: 2}
   darkMaterial: {fileID: 2100000, guid: eaf60ee14dbf74f49a69ec22514864cd, type: 2}
+  globalConfiguration: {fileID: 0}
   handRenderer: {fileID: 5420076474256706298}
 --- !u!1 &6963077026937618460
 GameObject:
@@ -2830,6 +2831,10 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5741710710766187635, guid: 61c9b69b5a0eb3059964fd18178673e8, type: 3}
       propertyPath: m_ThrowOnDetach
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5741710710766187635, guid: 61c9b69b5a0eb3059964fd18178673e8, type: 3}
+      propertyPath: m_UseDynamicAttach
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 5741710710766187635, guid: 61c9b69b5a0eb3059964fd18178673e8, type: 3}

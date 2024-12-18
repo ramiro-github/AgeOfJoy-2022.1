@@ -931,6 +931,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   lightMaterial: {fileID: 2100000, guid: 2a4e7c46e1406141bbc88455a0b0fb9b, type: 2}
   darkMaterial: {fileID: 2100000, guid: eaf60ee14dbf74f49a69ec22514864cd, type: 2}
+  globalConfiguration: {fileID: 0}
   handRenderer: {fileID: 7866455786409388466}
 --- !u!1 &7837202744179897216
 GameObject:
@@ -974,7 +975,7 @@ CapsuleCollider:
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
-    m_Bits: 2304
+    m_Bits: 133376
   m_ExcludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -1305,7 +1306,7 @@ CapsuleCollider:
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
-    m_Bits: 2304
+    m_Bits: 133376
   m_ExcludeLayers:
     serializedVersion: 2
     m_Bits: 0
