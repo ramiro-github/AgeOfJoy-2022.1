@@ -13426,9 +13426,17 @@ PrefabInstance:
     m_TransformParent: {fileID: 0}
     m_Modifications:
     - target: {fileID: 1604874108228414246, guid: 24985c4a791f0434cb08c563ef072abf, type: 3}
+      propertyPath: audio
+      value: 
+      objectReference: {fileID: 302311516}
+    - target: {fileID: 1604874108228414246, guid: 24985c4a791f0434cb08c563ef072abf, type: 3}
       propertyPath: isMixedReality
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 1604874108228414246, guid: 24985c4a791f0434cb08c563ef072abf, type: 3}
+      propertyPath: audioIntroGalleryExterior
+      value: 
+      objectReference: {fileID: 302311516}
     - target: {fileID: 5331591043188458429, guid: 24985c4a791f0434cb08c563ef072abf, type: 3}
       propertyPath: m_LocalPosition.x
       value: -8.307

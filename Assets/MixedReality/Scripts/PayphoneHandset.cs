@@ -11,9 +11,8 @@ public class PayphoneHandset : MonoBehaviour
     private Quaternion originalLocalRotation;
     private Transform originalParent;
     public PayphoneCabin payphoneCabin;
-    private bool selected = false;
+    public bool selected = false;
     private XRGrabInteractable grabInteractable;
-
     private bool canLoadingScene = true;
 
     void Start()
@@ -29,7 +28,7 @@ public class PayphoneHandset : MonoBehaviour
         originalLocalRotation = gameObject.transform.localRotation;
     }
 
-    void restoreOriginalValues()
+    void RestoreOriginalValues()
     {
         gameObject.transform.parent = originalParent;
         gameObject.transform.localPosition = originalLocalPosition;
@@ -43,24 +42,21 @@ public class PayphoneHandset : MonoBehaviour
 
     public void UnSelected()
     {
+        RestoreOriginalValues();
+        payphoneCabin.StopLoadScene();
         selected = false;
-        restoreOriginalValues();
     }
 
-    private IEnumerator UnSelectedDelay()
+    public void ForceUnSelected()
     {
-        yield return new WaitForSeconds(0.5f);
-
         IXRSelectInteractor currentInteractor = grabInteractable.interactorsSelecting[0];
         grabInteractable.interactionManager.SelectExit(currentInteractor, grabInteractable);
     }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (other.CompareTag("ear") && canLoadingScene && selected)
+        if (other.CompareTag("ear") && selected)
         {
-            StartCoroutine(UnSelectedDelay());
-            canLoadingScene = false;
             payphoneCabin.LoadScene();
         }
     }
@@ -69,7 +65,15 @@ public class PayphoneHandset : MonoBehaviour
     {
         if (other.CompareTag("ear"))
         {
-            canLoadingScene = true;
+            payphoneCabin.MuteEffectAudio();
+        }
+    }
+
+    void Update()
+    {
+        if (Keyboard.current.rKey.wasPressedThisFrame)
+        {
+            UnSelected();
         }
     }
 }
