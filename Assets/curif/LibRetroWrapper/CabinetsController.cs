@@ -479,6 +479,9 @@ public class CabinetsController : MonoBehaviour
 
     void checkAndLoadCabinet(CabinetControllerInformation cci)
     {
+        if (!MixedRealityManager.IsVrExperience)
+            return;
+
         if (!cci.IsOutOfOrderActive || cci.IsFaulty)
             return;
 
@@ -612,6 +615,9 @@ public class CabinetsController : MonoBehaviour
 
     void checkAndUnloadCabinet(CabinetControllerInformation cabCtrlInfo)
     {
+        if (!MixedRealityManager.IsVrExperience)
+            return;
+
         if (cabCtrlInfo.IsOutOfOrderActive || cabCtrlInfo.IsFaulty)
             return;
 

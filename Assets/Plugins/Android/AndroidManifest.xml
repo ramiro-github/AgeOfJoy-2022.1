@@ -5,11 +5,19 @@
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
+        <category android:name="com.oculus.intent.category.VR" />
       </intent-filter>
-	  <meta-data android:name="unityplayer.SkipPermissionsDialog" android:value="false" />
-	</activity>
+      <meta-data android:name="unityplayer.SkipPermissionsDialog" android:value="false" />
+      <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+    </activity>
     <meta-data android:name="com.samsung.android.vr.application.mode" android:value="vr_only" />
+    <meta-data android:name="com.oculus.handtracking.frequency" android:value="LOW" />
+    <meta-data android:name="com.oculus.ossplash.background" android:value="passthrough-contextual" />
+    <meta-data android:name="com.oculus.telemetry.project_guid" android:value="9986429f-f988-424b-9f22-4a9579811bb4" />
+    <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s" />
   </application>
   <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true" />
-
+  <uses-feature android:name="oculus.software.handtracking" android:required="false" />
+  <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
+  <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
 </manifest>
