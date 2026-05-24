@@ -138,8 +138,8 @@ EditorBuildSettings:
     path: Assets/Scenes/room022.unity
     guid: 0f095cbf7876f7740aa287e855ae8943
   m_configObjects:
-    Unity.XR.Oculus.Settings: {fileID: 11400000, guid: 5f361f4d65653ad42a14596d6135f5e4, type: 2}
+    Unity.XR.Oculus.Settings: {fileID: 11400000, guid: 075984cf43024614d8b8335d8335ce9c, type: 2}
     com.unity.input.settings: {fileID: 11400000, guid: f99fefba9deea4845a851f64f04f15c8, type: 2}
-    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: a2e33b4088a41794ebf6efc1bb5c17db, type: 2}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 1e542e686c68791498967ea8d1b00c34, type: 2}
     com.unity.xr.openxr.settings4: {fileID: 11400000, guid: c749a4b68b541a64393093c2f69b8c90, type: 2}
     xr.sdk.mock-hmd.settings: {fileID: 11400000, guid: 62116d390b63af548969463888b51fb8, type: 2}
