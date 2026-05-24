@@ -6,6 +6,7 @@ using System.Collections;
 using AOJ.Managers;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.XR;
 
 public class MRPassthroughController : MonoBehaviour
 {
@@ -29,6 +30,19 @@ public class MRPassthroughController : MonoBehaviour
 
     public bool IsPassthroughEnabled => passthroughLayer != null && passthroughLayer.enabled;
     public bool PassthroughSystemReady => passthroughSystemReady;
+
+    /// <summary>True when OVR/XR is active enough to query or enable passthrough (Quest build or Editor + Link).</summary>
+    public static bool IsPassthroughRuntimeAvailable()
+    {
+        if (OVRManager.instance == null)
+            return false;
+
+#if UNITY_EDITOR
+        return XRSettings.enabled && XRSettings.isDeviceActive;
+#else
+        return true;
+#endif
+    }
 
     public void Initialize()
     {
@@ -63,6 +77,20 @@ public class MRPassthroughController : MonoBehaviour
             Initialize();
         if (passthroughLayer == null || xrCamera == null)
             yield break;
+
+        if (!IsPassthroughRuntimeAvailable())
+        {
+#if UNITY_EDITOR
+            ConfigManager.WriteConsoleWarning(
+                $"{LogPrefix} Editor: XR/OVR not initialized — skipping passthrough (MR layout test mode)");
+            passthroughSystemReady = true;
+            MREditorMrSimulator.Instance?.ApplyPassthroughBackdrop(xrCamera);
+#else
+            ConfigManager.WriteConsoleError($"{LogPrefix} passthrough unavailable — OVR/XR not ready");
+            passthroughSystemReady = false;
+#endif
+            yield break;
+        }
 
         LogPassthroughDiagnostics("before enable");
 
@@ -101,6 +129,8 @@ public class MRPassthroughController : MonoBehaviour
 
         RestoreFadeSphereVisuals();
 
+        MREditorMrSimulator.Instance?.ClearPassthroughBackdrop();
+
         if (EventManager.Instance != null)
             EventManager.Instance.IsPassthrough = false;
 
@@ -109,6 +139,9 @@ public class MRPassthroughController : MonoBehaviour
 
     void ApplyPassthroughRendering()
     {
+        if (!IsPassthroughRuntimeAvailable())
+            return;
+
         EnsureInsightPassthroughEnabled();
         SuppressFadeSphereVisuals();
 
@@ -146,6 +179,10 @@ public class MRPassthroughController : MonoBehaviour
     IEnumerator WaitForPassthroughSystemReady()
     {
         passthroughSystemReady = false;
+
+        if (!IsPassthroughRuntimeAvailable())
+            yield break;
+
         EnsureInsightPassthroughEnabled();
 
         float elapsed = 0f;
@@ -229,6 +266,12 @@ public class MRPassthroughController : MonoBehaviour
 
     void LogPassthroughDiagnostics(string stage)
     {
+        if (!IsPassthroughRuntimeAvailable())
+        {
+            ConfigManager.WriteConsole($"{LogPrefix} diag [{stage}] passthrough runtime unavailable (XR not initialized)");
+            return;
+        }
+
         bool supported = OVRManager.IsInsightPassthroughSupported();
         bool initialized = OVRManager.IsInsightPassthroughInitialized();
         bool pending = OVRManager.IsInsightPassthroughInitPending();
@@ -242,6 +285,9 @@ public class MRPassthroughController : MonoBehaviour
 
     static void EnsureInsightPassthroughEnabled()
     {
+        if (!IsPassthroughRuntimeAvailable())
+            return;
+
         if (OVRManager.instance == null)
             return;
 

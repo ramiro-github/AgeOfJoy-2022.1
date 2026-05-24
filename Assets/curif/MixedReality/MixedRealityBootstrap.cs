@@ -25,7 +25,13 @@ public static class MixedRealityBootstrap
         root.AddComponent<MRPassthroughController>();
         root.AddComponent<MRSceneTransition>();
         root.AddComponent<MRModeInput>();
+        root.AddComponent<MREditMenuInput>();
         root.AddComponent<MRLayoutRegistry>();
+        root.AddComponent<MREnvironmentSurfaces>();
+        root.AddComponent<MRMrEnvironmentLighting>();
+        root.AddComponent<MRConfigurationCabinetController>();
+        root.AddComponent<MRRoomInfoUI>();
+        root.AddComponent<MREditorMrSimulator>();
 
         Object.DontDestroyOnLoad(root);
         ConfigManager.WriteConsole("[MixedRealityBootstrap] MixedRealitySystem installed");

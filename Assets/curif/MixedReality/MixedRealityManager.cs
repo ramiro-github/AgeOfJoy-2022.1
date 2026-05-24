@@ -20,6 +20,8 @@ public class MixedRealityManager : MonoBehaviour
     MRPassthroughController passthrough;
     MRSceneTransition sceneTransition;
     MRLayoutRegistry layoutRegistry;
+    MRMrEnvironmentLighting mrLighting;
+    MREnvironmentSurfaces environmentSurfaces;
     bool transitionInProgress;
 
     /// <summary>True when VR gallery rules (CabinetsController slots, registry rooms) should run.</summary>
@@ -48,6 +50,17 @@ public class MixedRealityManager : MonoBehaviour
         layoutRegistry = GetComponent<MRLayoutRegistry>();
         if (layoutRegistry == null)
             layoutRegistry = gameObject.AddComponent<MRLayoutRegistry>();
+
+        mrLighting = GetComponent<MRMrEnvironmentLighting>();
+        if (mrLighting == null)
+            mrLighting = gameObject.AddComponent<MRMrEnvironmentLighting>();
+
+        environmentSurfaces = GetComponent<MREnvironmentSurfaces>();
+        if (environmentSurfaces == null)
+            environmentSurfaces = gameObject.AddComponent<MREnvironmentSurfaces>();
+
+        if (GetComponent<MRRoomInfoUI>() == null)
+            gameObject.AddComponent<MRRoomInfoUI>();
 
         passthrough.Initialize();
         ConfigManager.WriteConsole($"{LogPrefix} ready (mode={CurrentMode})");
@@ -94,6 +107,10 @@ public class MixedRealityManager : MonoBehaviour
         transitionInProgress = true;
         ConfigManager.WriteConsole($"{LogPrefix} EnterMR start");
 
+        MRScenePermissions.Reset();
+        yield return MRScenePermissions.EnsureGranted();
+        MRRoomInfoUI.Instance?.RefreshContent();
+
         MRVrSystemsGate.SuspendForMR();
 
         // Passthrough primeiro, com cenas VR ainda carregadas (padrão Meta).
@@ -108,7 +125,16 @@ public class MixedRealityManager : MonoBehaviour
         yield return sceneTransition.UnloadVrScenes();
 
         EnsureMRSpaceOrigin();
+        Transform player = FindPlayerTransform();
+        if (environmentSurfaces != null)
+            yield return environmentSurfaces.ProbeWhenReady(player);
+
+        if (environmentSurfaces != null && MRSpaceOrigin != null)
+            environmentSurfaces.AlignOriginToFloor(MRSpaceOrigin, player);
+
+        mrLighting?.Spawn(MRSpaceOrigin);
         layoutRegistry?.SpawnAll(MRSpaceOrigin);
+        MRConfigurationCabinetController.Instance?.SpawnAtMrOrigin();
         SetMode(ExperienceMode.MR);
 
         transitionInProgress = false;
@@ -120,7 +146,15 @@ public class MixedRealityManager : MonoBehaviour
         transitionInProgress = true;
         ConfigManager.WriteConsole($"{LogPrefix} EnterVR start");
 
+        MRConfigurationCabinetController.Instance?.ForceCloseEdit();
+        MRConfigurationCabinetController.Instance?.Despawn();
+        if (CurrentMode == ExperienceMode.MR_EDIT)
+            SetMode(ExperienceMode.MR);
+
         layoutRegistry?.DespawnAll();
+        mrLighting?.Despawn();
+        environmentSurfaces?.ClearMrukScene();
+        MRRoomInfoUI.Instance?.Hide();
         passthrough.DisablePassthrough();
         DestroyMRSpaceOrigin();
         SetMode(ExperienceMode.VR);

@@ -3,11 +3,11 @@ This program is free software: you can redistribute it and/or modify it under th
 */
 
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 /// <summary>
-/// MR cabinet layout (mr-layout.yaml). Phase 1: no spawn — empty real-world space.
-/// Phase 2a+: load YAML and spawn via CabinetFactory; UI add/delete in 2b/2c.
+/// MR cabinet layout (mr-layout.yaml). Phase 2b: load/save, spawn, delete.
 /// VR registry.yaml is never modified by this class.
 /// </summary>
 public class MRLayoutRegistry : MonoBehaviour
@@ -17,11 +17,15 @@ public class MRLayoutRegistry : MonoBehaviour
 
     public static MRLayoutRegistry Instance { get; private set; }
 
-    readonly List<GameObject> spawnedCabinets = new List<GameObject>();
+    readonly Dictionary<string, GameObject> spawnedById = new Dictionary<string, GameObject>();
+    MRLayout layout;
 
-    public string LayoutFilePath => System.IO.Path.Combine(ConfigManager.CabinetsDB, LayoutFileName);
+    public string LayoutFilePath => Path.Combine(ConfigManager.CabinetsDB, LayoutFileName);
 
-    public int SpawnedCount => spawnedCabinets.Count;
+    public int SpawnedCount => spawnedById.Count;
+
+    public IReadOnlyList<MRCabinetPlacement> Placements =>
+        layout != null ? layout.GetCabinets() : System.Array.Empty<MRCabinetPlacement>();
 
     void Awake()
     {
@@ -40,10 +44,20 @@ public class MRLayoutRegistry : MonoBehaviour
             Instance = null;
     }
 
-    /// <summary>Phase 2a+: spawn all entries from mr-layout.yaml under MRSpaceOrigin.</summary>
+    public void EnsureLayoutLoaded()
+    {
+        if (layout != null)
+            return;
+
+        layout = MRLayout.LoadOrCreate(LayoutFilePath);
+        ConfigManager.WriteConsole($"{LogPrefix} layout loaded ({layout.Cabinets.Count} entries)");
+    }
+
+    /// <summary>Spawn all entries from mr-layout.yaml under MRSpaceOrigin.</summary>
     public void SpawnAll(Transform mrSpaceOrigin)
     {
         DespawnAll();
+        EnsureLayoutLoaded();
 
         if (mrSpaceOrigin == null)
         {
@@ -51,26 +65,155 @@ public class MRLayoutRegistry : MonoBehaviour
             return;
         }
 
-        // Phase 1 — MR enters with no cabinets; placement is via hand UI (phases 2b/2c).
-        ConfigManager.WriteConsole($"{LogPrefix} SpawnAll: phase 1 — no cabinets (layout file: {LayoutFilePath})");
-    }
-
-    /// <summary>Removes all MR-spawned cabinets from the scene.</summary>
-    public void DespawnAll()
-    {
-        for (int i = spawnedCabinets.Count - 1; i >= 0; i--)
+        if (layout.Cabinets.Count == 0)
         {
-            if (spawnedCabinets[i] != null)
-                Destroy(spawnedCabinets[i]);
+            ConfigManager.WriteConsole($"{LogPrefix} SpawnAll: layout empty ({LayoutFilePath})");
+            return;
         }
 
-        spawnedCabinets.Clear();
+        int index = 0;
+        foreach (MRCabinetPlacement placement in layout.GetCabinets())
+        {
+            if (placement == null || string.IsNullOrEmpty(placement.Id))
+                continue;
+
+            if (TrySpawnPlacement(placement, mrSpaceOrigin, index))
+                index++;
+        }
+
+        ConfigManager.WriteConsole($"{LogPrefix} SpawnAll done ({spawnedById.Count} cabinets)");
+    }
+
+    public void DespawnAll()
+    {
+        foreach (GameObject root in spawnedById.Values)
+        {
+            if (root != null)
+                Destroy(root);
+        }
+
+        spawnedById.Clear();
         ConfigManager.WriteConsole($"{LogPrefix} DespawnAll done");
     }
 
-    internal void TrackSpawned(GameObject cabinetRoot)
+    public bool RemovePlacement(string placementId)
     {
-        if (cabinetRoot != null && !spawnedCabinets.Contains(cabinetRoot))
-            spawnedCabinets.Add(cabinetRoot);
+        EnsureLayoutLoaded();
+        if (string.IsNullOrEmpty(placementId))
+            return false;
+
+        MRCabinetPlacement placement = layout.FindById(placementId);
+        if (placement == null)
+            return false;
+
+        DestroySpawnedInstance(placementId);
+        layout.RemoveById(placementId);
+        layout.Save(LayoutFilePath);
+        ConfigManager.WriteConsole($"{LogPrefix} removed {placement.DisplayLabel} ({placementId})");
+        return true;
+    }
+
+    public bool TryGetSpawnedRoot(string placementId, out GameObject root)
+    {
+        if (string.IsNullOrEmpty(placementId))
+        {
+            root = null;
+            return false;
+        }
+
+        return spawnedById.TryGetValue(placementId, out root) && root != null;
+    }
+
+    bool TrySpawnPlacement(MRCabinetPlacement placement, Transform mrSpaceOrigin, int index)
+    {
+        if (string.IsNullOrEmpty(placement.CabinetDBName))
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} skip entry {placement.Id}: missing cabinetDBName");
+            return false;
+        }
+
+        CabinetInformation cabInfo;
+        try
+        {
+            cabInfo = CabinetInformation.fromYaml(Path.Combine(ConfigManager.CabinetsDB, placement.CabinetDBName));
+        }
+        catch (System.Exception e)
+        {
+            ConfigManager.WriteConsoleException($"{LogPrefix} yaml load failed for {placement.CabinetDBName}", e);
+            return false;
+        }
+
+        if (cabInfo == null)
+        {
+            ConfigManager.WriteConsoleError($"{LogPrefix} no description for {placement.CabinetDBName}");
+            return false;
+        }
+
+        Vector3 localPos = placement.Position != null ? placement.Position.ToVector3() : Vector3.zero;
+        Quaternion localRot = placement.Rotation != null ? placement.Rotation.ToQuaternion() : Quaternion.identity;
+        Vector3 worldPos = mrSpaceOrigin.TransformPoint(localPos);
+        Quaternion worldRot = mrSpaceOrigin.rotation * localRot;
+
+        Cabinet cabinet;
+        try
+        {
+            cabinet = CabinetFactory.fromInformation(
+                cabInfo,
+                MixedRealityManager.MrRoomName,
+                index,
+                worldPos,
+                worldRot,
+                mrSpaceOrigin,
+                agentPlayerPositions: null,
+                backgroundSoundController: null);
+        }
+        catch (System.Exception e)
+        {
+            ConfigManager.WriteConsoleException($"{LogPrefix} spawn failed {placement.CabinetDBName}", e);
+            return false;
+        }
+
+        if (cabinet == null)
+            return false;
+
+        float scale = placement.Scale > 0f ? placement.Scale : 1f;
+        cabinet.gameObject.transform.localScale = Vector3.one * scale;
+
+        var marker = cabinet.gameObject.GetComponent<MRPlacedCabinet>();
+        if (marker == null)
+            marker = cabinet.gameObject.AddComponent<MRPlacedCabinet>();
+        marker.Initialize(placement.Id, placement.CabinetDBName);
+
+        spawnedById[placement.Id] = cabinet.gameObject;
+        ConfigManager.WriteConsole($"{LogPrefix} spawned {placement.DisplayLabel} at {worldPos}");
+        return true;
+    }
+
+    void DestroySpawnedInstance(string placementId)
+    {
+        if (!spawnedById.TryGetValue(placementId, out GameObject root) || root == null)
+            return;
+
+        StopLibretroOnCabinet(root);
+
+        var replace = root.GetComponent<CabinetReplace>();
+        if (replace != null)
+            Destroy(replace.gameObject);
+        else
+            Destroy(root);
+
+        spawnedById.Remove(placementId);
+    }
+
+    static void StopLibretroOnCabinet(GameObject cabinetRoot)
+    {
+        var screens = cabinetRoot.GetComponentsInChildren<LibretroScreenController>(true);
+        foreach (LibretroScreenController screen in screens)
+        {
+            if (screen == null)
+                continue;
+            if (LibretroMameCore.isRunning(screen.ScreenName, screen.GameFile))
+                LibretroMameCore.End(screen.ScreenName, screen.GameFile);
+        }
     }
 }
