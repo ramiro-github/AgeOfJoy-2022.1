@@ -167,6 +167,7 @@ public class GameRegistry : MonoBehaviour
     {
         if (!Directory.Exists(ConfigManager.CabinetsDB))
         {
+            cabinetDirectories = Array.Empty<string>();
             ConfigManager.WriteConsoleWarning("[GameRegistry.loadCabinetsFromDirectory] Game is initializing directories, not possible to load any cabinet. Load some cabinets and restart the game");
             return;
         }
@@ -175,8 +176,12 @@ public class GameRegistry : MonoBehaviour
         cabinetDirectories = System.IO.Directory.GetDirectories(ConfigManager.CabinetsDB)
                                                 .OrderBy(path => path)
                                                 .Select(path => System.IO.Path.GetFileName(path))
+                                                .Where(name => !string.IsNullOrEmpty(name) && !name.StartsWith("."))
                                                 .ToArray();
     }
+
+    /// <summary>Re-scan cabinetsdb (e.g. TestUI / MR panel after folders were created).</summary>
+    public static void ReloadCabinetDirectoriesFromDisk() => loadCabinetsFromDirectory();
     public void AddNewCabinetDirectory(string newDirectory)
     {
         if (string.IsNullOrWhiteSpace(newDirectory))

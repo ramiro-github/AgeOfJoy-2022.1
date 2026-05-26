@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cabinet Manager MR</title>
+
+<style>
+body {
+  background-color: #000000;
+  color: #00ff99;
+  font-family: Tahoma, Verdana, Arial, sans-serif;
+  margin: 0;
+  padding: 20px;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+.main {
+  width: 980px;
+  margin: auto;
+  background: #111111;
+  border: 3px ridge #444444;
+  box-shadow: 0 0 18px #00ff99;
+}
+
+.header {
+  background: linear-gradient(to right, #000000, #202020);
+  color: #00ff99;
+  font-size: 28px;
+  font-weight: bold;
+  padding: 16px;
+  text-align: center;
+  border-bottom: 2px solid #00ff99;
+}
+
+.subtitle {
+  color: #aaaaaa;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.sidebar {
+  width: 220px;
+  background: #090909;
+  vertical-align: top;
+  border-right: 1px solid #00ff99;
+  padding: 12px;
+  height: 520px;
+}
+
+.sidebar a {
+  display: block;
+  color: #00ff99;
+  text-decoration: none;
+  margin-bottom: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sidebar a:hover {
+  color: white;
+}
+
+.content {
+  background: #151515;
+  padding: 15px;
+  vertical-align: top;
+  height: 520px;
+}
+
+.window {
+  border: 1px solid #00ff99;
+  margin-bottom: 18px;
+  background: #0d0d0d;
+}
+
+.window-header {
+  background: #001a12;
+  color: #00ff99;
+  padding: 7px;
+  font-size: 13px;
+  font-weight: bold;
+  border-bottom: 1px solid #00ff99;
+}
+
+.window-content {
+  padding: 10px;
+  font-size: 13px;
+  color: #cccccc;
+}
+
+.retro-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: white;
+  font-size: 12px;
+}
+
+.retro-table th {
+  background: #002b1f;
+  color: #00ff99;
+  border: 1px solid #00ff99;
+  padding: 6px;
+  text-align: left;
+}
+
+.retro-table td {
+  border: 1px solid #333333;
+  padding: 6px;
+  vertical-align: middle;
+}
+
+.thumbnail {
+  width: 92px;
+  height: 52px;
+  border: 2px ridge #555555;
+  object-fit: cover;
+}
+
+.button {
+  background: #c0c0c0;
+  color: #000000;
+  border-top: 2px solid #ffffff;
+  border-left: 2px solid #ffffff;
+  border-right: 2px solid #555555;
+  border-bottom: 2px solid #555555;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+  min-width: 80px;
+}
+
+.footer {
+  background: #050505;
+  color: #888888;
+  text-align: center;
+  padding: 10px;
+  font-size: 11px;
+  border-top: 1px solid #00ff99;
+}
+
+.page {
+  display: none;
+}
+
+.page.active {
+  display: block;
+}
+</style>
+</head>
+
+<body>
+
+<table class="main">
+<tr>
+<td colspan="2" class="header">
+CABINET MANAGER MR
+<div class="subtitle">
+Cabinet manager for the MR environment
+</div>
+</td>
+</tr>
+
+<tr>
+
+<td class="sidebar">
+  <a onclick="showPage('cabinets')">Cabinets</a>
+  <a onclick="showPage('added')">Added Cabinets</a>
+  <a onclick="showPage('help')">Help</a>
+</td>
+
+<td class="content">
+
+<div id="cabinets" class="page active">
+
+<div class="window">
+<div class="window-header">CABINETS</div>
+
+<div class="window-content">
+<table class="retro-table">
+
+<tr>
+<th></th>
+<th>Name</th>
+<th>Added</th>
+<th>Action</th>
+</tr>
+
+<tr>
+<td><img class="thumbnail" src="https://dummyimage.com/160x90/001144/ffffff&text=SNES"></td>
+<td>SNES Classic Cabinet</td>
+<td>Yes</td>
+<td><button class="button">Remove</button></td>
+</tr>
+
+<tr>
+<td><img class="thumbnail" src="https://dummyimage.com/160x90/330000/ffcc00&text=NEO+GEO"></td>
+<td>Neo Geo Arcade</td>
+<td>No</td>
+<td><button class="button">Add</button></td>
+</tr>
+
+<tr>
+<td><img class="thumbnail" src="https://dummyimage.com/160x90/111111/ff3333&text=RACING"></td>
+<td>Racing Cabinet 2000</td>
+<td>Yes</td>
+<td><button class="button">Remove</button></td>
+</tr>
+
+</table>
+</div>
+</div>
+
+</div>
+
+<div id="added" class="page">
+
+<div class="window">
+<div class="window-header">ADDED CABINETS</div>
+
+<div class="window-content">
+
+<table class="retro-table">
+
+<tr>
+<th>Name</th>
+<th>Position</th>
+<th>Status</th>
+</tr>
+
+<tr>
+<td>SNES Classic Cabinet</td>
+<td>X: 2 / Y: 0 / Z: 1</td>
+<td>Active</td>
+</tr>
+
+<tr>
+<td>Racing Cabinet 2000</td>
+<td>X: -1 / Y: 0 / Z: 4</td>
+<td>Active</td>
+</tr>
+
+</table>
+
+</div>
+</div>
+
+</div>
+
+<div id="help" class="page">
+
+<div class="window">
+<div class="window-header">HELP</div>
+
+<div class="window-content">
+
+<p>Use the side menu to navigate between pages.</p>
+<p>Add or remove cabinets from the MR environment.</p>
+<p>This interface simulates a retro 90s website.</p>
+
+</div>
+</div>
+
+</div>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2" class="footer">
+© 1990 CABINET MANAGER MR • Age Of Joy
+</td>
+</tr>
+
+</table>
+
+<script>
+function showPage(pageId) {
+  const pages = document.querySelectorAll('.page')
+
+  pages.forEach(page => {
+    page.classList.remove('active')
+  })
+
+  document.getElementById(pageId).classList.add('active')
+}
+</script>
+
+</body>
+</html>

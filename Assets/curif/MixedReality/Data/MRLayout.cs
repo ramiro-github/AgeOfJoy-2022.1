@@ -101,6 +101,38 @@ public class MRLayout
         return false;
     }
 
+    public MRCabinetPlacement FindByCabinetDBName(string cabinetDBName)
+    {
+        if (string.IsNullOrEmpty(cabinetDBName))
+            return null;
+
+        lock (cabinetsLock)
+        {
+            foreach (MRCabinetPlacement placement in Cabinets)
+            {
+                if (placement != null
+                    && string.Equals(placement.CabinetDBName, cabinetDBName, StringComparison.OrdinalIgnoreCase))
+                    return placement;
+            }
+        }
+
+        return null;
+    }
+
+    public MRCabinetPlacement AddPlacement(MRCabinetPlacement placement)
+    {
+        if (placement == null || string.IsNullOrEmpty(placement.CabinetDBName))
+            return null;
+
+        lock (cabinetsLock)
+        {
+            Cabinets.Add(placement);
+            dirty = true;
+        }
+
+        return placement;
+    }
+
     public void MarkSaved() => dirty = false;
 
     public bool NeedsSave() => dirty;

@@ -2,8 +2,10 @@
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 */
 
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 /// <summary>
@@ -122,6 +124,110 @@ public class MRLayoutRegistry : MonoBehaviour
         }
 
         return spawnedById.TryGetValue(placementId, out root) && root != null;
+    }
+
+    /// <summary>True when the cabinet has an entry in mr-layout (placed in MR space).</summary>
+    public bool IsCabinetInScene(string cabinetDBName) =>
+        FindPlacementByCabinetDBName(cabinetDBName) != null;
+
+    public MRCabinetPlacement FindPlacementByCabinetDBName(string cabinetDBName)
+    {
+        EnsureLayoutLoaded();
+        return layout?.FindByCabinetDBName(cabinetDBName);
+    }
+
+    /// <summary>All cabinet folders under cabinetsdb (same rule as GameRegistry: every subfolder).</summary>
+    public static List<string> GetCatalogCabinetNames()
+    {
+        var names = new List<string>();
+        string dbPath = ConfigManager.CabinetsDB;
+
+        ConfigManager.CreateFolder(ConfigManager.BaseDir);
+        ConfigManager.CreateFolder(dbPath);
+
+        GameRegistry.ReloadCabinetDirectoriesFromDisk();
+        if (GameRegistry.cabinetDirectories != null && GameRegistry.cabinetDirectories.Length > 0)
+        {
+            names.AddRange(GameRegistry.cabinetDirectories);
+            ConfigManager.WriteConsole($"{LogPrefix} catalog {names.Count} cabinet(s) (GameRegistry) from {dbPath}");
+            return names;
+        }
+
+        if (!Directory.Exists(dbPath))
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} CabinetsDB missing: {dbPath}");
+            return names;
+        }
+
+        foreach (string dir in Directory.GetDirectories(dbPath).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            string folderName = Path.GetFileName(dir);
+            if (!IsCatalogFolderName(folderName))
+                continue;
+            names.Add(folderName);
+        }
+
+        ConfigManager.WriteConsole($"{LogPrefix} catalog {names.Count} cabinet(s) (scan) from {dbPath}");
+        return names;
+    }
+
+    static bool IsCatalogFolderName(string folderName)
+    {
+        if (string.IsNullOrEmpty(folderName))
+            return false;
+        if (folderName.StartsWith("."))
+            return false;
+        if (string.Equals(folderName, Path.GetFileNameWithoutExtension(LayoutFileName), StringComparison.OrdinalIgnoreCase))
+            return false;
+        return true;
+    }
+
+    /// <summary>Add to mr-layout.yaml and spawn in the MR space (MVP: one instance per cabinetDBName).</summary>
+    public bool TryAddCabinetToScene(string cabinetDBName, Transform mrSpaceOrigin, Vector3 worldPosition, Quaternion worldRotation)
+    {
+        EnsureLayoutLoaded();
+        if (layout == null || string.IsNullOrEmpty(cabinetDBName) || mrSpaceOrigin == null)
+            return false;
+
+        if (FindPlacementByCabinetDBName(cabinetDBName) != null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} already in layout: {cabinetDBName}");
+            return false;
+        }
+
+        var placement = new MRCabinetPlacement
+        {
+            Id = $"{cabinetDBName}-{Guid.NewGuid():N}".Substring(0, Mathf.Min(48, cabinetDBName.Length + 33)),
+            CabinetDBName = cabinetDBName,
+            Position = MRVector3.From(mrSpaceOrigin.InverseTransformPoint(worldPosition)),
+            Rotation = MRQuaternion.From(Quaternion.Inverse(mrSpaceOrigin.rotation) * worldRotation),
+            Scale = 1f
+        };
+
+        layout.AddPlacement(placement);
+        layout.Save(LayoutFilePath);
+
+        int index = spawnedById.Count;
+        if (!TrySpawnPlacement(placement, mrSpaceOrigin, index))
+        {
+            layout.RemoveById(placement.Id);
+            layout.Save(LayoutFilePath);
+            return false;
+        }
+
+        ConfigManager.WriteConsole($"{LogPrefix} added {cabinetDBName} ({placement.Id})");
+        return true;
+    }
+
+    /// <summary>Remove from layout and despawn if present.</summary>
+    public bool TryRemoveCabinetFromScene(string cabinetDBName)
+    {
+        EnsureLayoutLoaded();
+        MRCabinetPlacement placement = FindPlacementByCabinetDBName(cabinetDBName);
+        if (placement == null || string.IsNullOrEmpty(placement.Id))
+            return false;
+
+        return RemovePlacement(placement.Id);
     }
 
     bool TrySpawnPlacement(MRCabinetPlacement placement, Transform mrSpaceOrigin, int index)
