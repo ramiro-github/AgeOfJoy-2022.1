@@ -13,6 +13,7 @@ public class CabinetManagerMRUI : MonoBehaviour
 {
     const string LogPrefix = "[CabinetManagerMRUI]";
     const string NotFoundCabinetMessage = "Not Found Cabinet";
+    const string UiLayerName = "CabinetManagerMRUI";
 
     static readonly Color NeonGreen = new Color32(0x00, 0xff, 0x99, 0xff);
     static readonly Color NeonGreenDark = new Color32(0x00, 0x2b, 0x1f, 0xff);
@@ -71,6 +72,7 @@ public class CabinetManagerMRUI : MonoBehaviour
     readonly List<Text> menuTexts = new List<Text>();
 
     Font uiFont;
+    int uiLayer = -1;
     MRLayoutRegistry registry;
     Transform mrSpaceOrigin;
     Transform displaySurface;
@@ -114,6 +116,7 @@ public class CabinetManagerMRUI : MonoBehaviour
     void Awake()
     {
         uiFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        EnsureUiLayerResolved();
 
         if (canvas == null)
             canvas = GetComponentInChildren<Canvas>(true);
@@ -265,6 +268,7 @@ public class CabinetManagerMRUI : MonoBehaviour
         if (canvas == null)
         {
             GameObject canvasGo = new GameObject("Canvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            ApplyUiLayer(canvasGo);
             canvasGo.transform.SetParent(transform, false);
             canvas = canvasGo.GetComponent<Canvas>();
         }
@@ -314,8 +318,47 @@ public class CabinetManagerMRUI : MonoBehaviour
         }
 
         Stretch(panelRoot);
+        ApplyUiLayer(canvas.gameObject);
     }
 
+    void EnsureUiLayerResolved()
+    {
+        if (uiLayer >= 0)
+            return;
+
+        uiLayer = LayerMask.NameToLayer(UiLayerName);
+        if (uiLayer < 0)
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} layer '{UiLayerName}' not found; cabinet UI may not render.");
+    }
+
+    void ApplyUiLayer(GameObject go)
+    {
+        if (go == null)
+            return;
+
+        EnsureUiLayerResolved();
+        if (uiLayer >= 0)
+            go.layer = uiLayer;
+    }
+
+    void ApplyUiLayerRecursive(Transform root)
+    {
+        if (root == null)
+            return;
+
+        EnsureUiLayerResolved();
+        if (uiLayer < 0)
+            return;
+
+        SetLayerRecursive(root, uiLayer);
+    }
+
+    static void SetLayerRecursive(Transform t, int layer)
+    {
+        t.gameObject.layer = layer;
+        for (int i = 0; i < t.childCount; i++)
+            SetLayerRecursive(t.GetChild(i), layer);
+    }
 
     RectTransform CreateOrGetRect(Transform parent, string name)
     {
@@ -330,6 +373,7 @@ public class CabinetManagerMRUI : MonoBehaviour
         }
 
         GameObject go = new GameObject(name, typeof(RectTransform));
+        ApplyUiLayer(go);
         go.transform.SetParent(parent, false);
         return go.GetComponent<RectTransform>();
     }
@@ -396,6 +440,7 @@ public class CabinetManagerMRUI : MonoBehaviour
         BuildHelpPage(helpPage);
 
         AddBoxBorder(panelRoot, 1f, NeonGreen);
+        ApplyUiLayerRecursive(canvas.transform);
         ApplyActivePage();
     }
 
@@ -579,12 +624,14 @@ public class CabinetManagerMRUI : MonoBehaviour
     ScrollRect BuildScrollTable(RectTransform parent, out RectTransform content)
     {
         GameObject scrollGo = new GameObject("ScrollTable", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
+        ApplyUiLayer(scrollGo);
         scrollGo.transform.SetParent(parent, false);
         RectTransform scrollRect = scrollGo.GetComponent<RectTransform>();
         Stretch(scrollRect, new Vector2(6, 6), new Vector2(-6, -6));
         AddImage(scrollGo, WindowBg);
 
         GameObject viewportGo = new GameObject("Viewport", typeof(RectTransform), typeof(Image), typeof(Mask));
+        ApplyUiLayer(viewportGo);
         viewportGo.transform.SetParent(scrollRect, false);
         RectTransform viewport = viewportGo.GetComponent<RectTransform>();
         Stretch(viewport);
@@ -592,6 +639,7 @@ public class CabinetManagerMRUI : MonoBehaviour
         viewportGo.GetComponent<Mask>().showMaskGraphic = true;
 
         GameObject contentGo = new GameObject("TableBody", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+        ApplyUiLayer(contentGo);
         contentGo.transform.SetParent(viewport, false);
         content = contentGo.GetComponent<RectTransform>();
         content.anchorMin = new Vector2(0f, 1f);
@@ -669,6 +717,8 @@ public class CabinetManagerMRUI : MonoBehaviour
             CreateCell(row, NotFoundCabinetMessage, 0.42f, 11, FontStyle.Bold, Color.white, TextAnchor.MiddleLeft, WindowBg);
             CreateCell(row, "-", 0.18f, 10, FontStyle.Normal, Color.white, TextAnchor.MiddleCenter, WindowBg);
             CreateCell(row, "", 0.22f, 10, FontStyle.Normal, Color.white, TextAnchor.MiddleCenter, WindowBg);
+            ApplyUiLayerRecursive(tableBody);
+            Canvas.ForceUpdateCanvases();
             return;
         }
 
@@ -685,6 +735,7 @@ public class CabinetManagerMRUI : MonoBehaviour
 
         selectedIndex = Mathf.Clamp(selectedIndex, 0, rows.Count - 1);
         UpdateRowVisuals();
+        ApplyUiLayerRecursive(tableBody);
         Canvas.ForceUpdateCanvases();
     }
 
@@ -707,6 +758,7 @@ public class CabinetManagerMRUI : MonoBehaviour
             CreateCell(row, "No cabinets added", 0.42f, 11, FontStyle.Bold, Color.white, TextAnchor.MiddleLeft, WindowBg);
             CreateCell(row, "-", 0.28f, 10, FontStyle.Normal, Color.white, TextAnchor.MiddleLeft, WindowBg);
             CreateCell(row, "-", 0.12f, 10, FontStyle.Normal, Color.white, TextAnchor.MiddleCenter, WindowBg);
+            ApplyUiLayerRecursive(addedTableBody);
             return;
         }
 
@@ -726,6 +778,8 @@ public class CabinetManagerMRUI : MonoBehaviour
             CreateCell(row, $"X:{x:F1} Y:{y:F1} Z:{z:F1}", 0.28f, 10, FontStyle.Normal, Color.white, TextAnchor.MiddleLeft, WindowBg);
             CreateCell(row, "Active", 0.12f, 10, FontStyle.Bold, NeonGreen, TextAnchor.MiddleCenter, WindowBg);
         }
+
+        ApplyUiLayerRecursive(addedTableBody);
     }
 
     CabinetRowView CreateCabinetRow(string cabinetName, bool inScene)
@@ -820,6 +874,7 @@ public class CabinetManagerMRUI : MonoBehaviour
         AddBoxBorder(cell, 1f, TableBorder, top: false, bottom: false, left: true, right: true);
 
         GameObject previewGo = new GameObject("Preview", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
+        ApplyUiLayer(previewGo);
         previewGo.transform.SetParent(cell, false);
         preview = previewGo.GetComponent<RawImage>();
         preview.color = Color.black;
@@ -1646,12 +1701,14 @@ public class CabinetManagerMRUI : MonoBehaviour
     {
         GameObject go = new GameObject(name, typeof(RectTransform));
         go.transform.SetParent(parent, false);
+        ApplyUiLayer(go);
         return go.GetComponent<RectTransform>();
     }
 
     Text CreateText(string value, int size, FontStyle style, Color color, TextAnchor anchor)
     {
         GameObject go = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+        ApplyUiLayer(go);
         Text text = go.GetComponent<Text>();
         text.font = uiFont;
         text.text = value;

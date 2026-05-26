@@ -16,6 +16,27 @@ TagManager:
   - floor
   - backgroundsound
   - screenControlCabinet
+  - QDSUIToggleBorderlessButton
+  - QDSUIToggleButton
+  - QDSUIToggleSwitch
+  - QDSUISharedThemeColor
+  - QDSUIAccentColor
+  - QDSUIIcon
+  - QDSUITextSecondaryColor
+  - QDSUIBorderlessButton
+  - QDSUISecondaryButton
+  - QDSUITooltip
+  - Locomotion
+  - PassThroughButton
+  - LocoButton
+  - LocoText
+  - PassThrough
+  - SamplesInfoPanel
+  - QDSUIDestructiveButton
+  - QDSUIPrimaryButton
+  - QDSUIToggleCheckboxRadio
+  - QDSUITextInputField
+  - QDSUISection
   layers:
   - Default
   - TransparentFX
@@ -34,7 +55,7 @@ TagManager:
   - floor
   - LightGunTarget
   - InteractablePart
-  - 
+  - CabinetManagerMRUI
   - 
   - 
   - 
