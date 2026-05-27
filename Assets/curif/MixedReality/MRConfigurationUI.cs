@@ -9,11 +9,11 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Video;
 
-public class CabinetManagerMRUI : MonoBehaviour
+public class MRConfigurationUI : MonoBehaviour
 {
-    const string LogPrefix = "[CabinetManagerMRUI]";
+    const string LogPrefix = "[MRConfigurationUI]";
+    const string UiLayerName = "MRConfigurationUI";
     const string NotFoundCabinetMessage = "Not Found Cabinet";
-    const string UiLayerName = "CabinetManagerMRUI";
 
     static readonly Color NeonGreen = new Color32(0x00, 0xff, 0x99, 0xff);
     static readonly Color NeonGreenDark = new Color32(0x00, 0x2b, 0x1f, 0xff);
@@ -36,6 +36,15 @@ public class CabinetManagerMRUI : MonoBehaviour
     [SerializeField] Transform screenAnchor;
     [SerializeField] Canvas canvas;
     [SerializeField] RectTransform panelRoot;
+    [Tooltip("When enabled, keeps the Canvas parent as placed in the scene (under the 3D model).")]
+    [SerializeField] bool preserveSceneCanvasTransform = true;
+    [Tooltip("RectTransform of the world-space Canvas on the 3D frame (Inspector values).")]
+    [SerializeField] Vector3 canvasLocalPosition = new Vector3(0.001f, -0.0048f, 0.0018f);
+    [SerializeField] Vector3 canvasLocalEuler = Vector3.zero;
+    [SerializeField] Vector3 canvasLocalScale = new Vector3(0.000765891f, 0.000781534f, 0.00054038f);
+    [SerializeField] Vector2 canvasSizeDelta = new Vector2(604.7664f, 595.2363f);
+    [Tooltip("Extra local rotation applied to UIRoot (content root inside the Canvas).")]
+    [SerializeField] Vector3 uiRootLocalEuler = Vector3.zero;
 
     [Header("Catalog")]
     [SerializeField] bool bootstrapCatalogOnStart = true;
@@ -274,7 +283,8 @@ public class CabinetManagerMRUI : MonoBehaviour
         }
 
         canvas.renderMode = RenderMode.WorldSpace;
-        canvas.worldCamera = Camera.main;
+        if (canvas.worldCamera == null)
+            canvas.worldCamera = Camera.main;
 
         GraphicRaycaster raycaster = canvas.GetComponent<GraphicRaycaster>();
         if (raycaster != null)
@@ -285,28 +295,28 @@ public class CabinetManagerMRUI : MonoBehaviour
             scaler = canvas.gameObject.AddComponent<CanvasScaler>();
 
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(500f, 500f);
+        scaler.referenceResolution = canvasSizeDelta;
         scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
         scaler.matchWidthOrHeight = 0.5f;
 
         RectTransform canvasRect = canvas.GetComponent<RectTransform>();
-        canvasRect.sizeDelta = new Vector2(850f, 800f);
+        if (!preserveSceneCanvasTransform || !IsCanvasPlacedInScene())
+        {
+            Transform parent = ResolveDisplayParent();
+            displaySurface = EnsureChild(parent, "UISurface");
+            canvas.transform.SetParent(displaySurface, false);
+        }
+        else
+        {
+            displaySurface = canvas.transform.parent;
+        }
 
-        Transform parent = ResolveDisplayParent();
-        displaySurface = EnsureChild(parent, "UISurface");
-        canvas.transform.SetParent(displaySurface, false);
-        canvas.transform.localPosition = new Vector3(0f, -0.006f, -0.002f);
-        canvas.transform.localRotation = Quaternion.identity;
-        canvas.transform.localScale = Vector3.one * 0.001f;
+        ApplyCanvasRectTransform(canvasRect);
 
         uiRoot = CreateOrGetRect(canvas.transform, "UIRoot");
-        uiRoot.anchorMin = new Vector2(0.5f, 0.5f);
-        uiRoot.anchorMax = new Vector2(0.5f, 0.5f);
-        uiRoot.pivot = new Vector2(0.5f, 0.5f);
-        uiRoot.anchoredPosition = Vector2.zero;
-        uiRoot.sizeDelta = canvasRect.sizeDelta;
+        Stretch(uiRoot);
         uiRoot.localScale = Vector3.one;
-        uiRoot.localRotation = Quaternion.Euler(180f, 0f, -90f);
+        uiRoot.localRotation = Quaternion.Euler(uiRootLocalEuler);
 
         if (panelRoot == null)
         {
@@ -376,6 +386,37 @@ public class CabinetManagerMRUI : MonoBehaviour
         ApplyUiLayer(go);
         go.transform.SetParent(parent, false);
         return go.GetComponent<RectTransform>();
+    }
+
+    void ApplyCanvasRectTransform(RectTransform canvasRect)
+    {
+        if (canvasRect == null)
+            return;
+
+        canvasRect.anchorMin = Vector2.zero;
+        canvasRect.anchorMax = Vector2.zero;
+        canvasRect.pivot = new Vector2(0.5f, 0.5f);
+        canvasRect.sizeDelta = canvasSizeDelta;
+        canvasRect.localPosition = canvasLocalPosition;
+        canvasRect.localRotation = Quaternion.Euler(canvasLocalEuler);
+        canvasRect.localScale = canvasLocalScale;
+    }
+
+    bool IsCanvasPlacedInScene()
+    {
+        if (canvas == null)
+            return false;
+
+        Transform displayParent = ResolveDisplayParent();
+        Transform t = canvas.transform;
+        while (t != null)
+        {
+            if (t == displayParent)
+                return true;
+            t = t.parent;
+        }
+
+        return false;
     }
 
     Transform ResolveDisplayParent()
@@ -459,11 +500,11 @@ public class CabinetManagerMRUI : MonoBehaviour
         layout.childForceExpandHeight = false;
         layout.spacing = 0f;
 
-        Text title = CreateText("CABINET MANAGER MR", 13, FontStyle.Bold, NeonGreen, TextAnchor.MiddleCenter);
+        Text title = CreateText("MR CONFIGURATION", 13, FontStyle.Bold, NeonGreen, TextAnchor.MiddleCenter);
         title.transform.SetParent(header, false);
         AddLayout(title.gameObject, -1f, 16f);
 
-        Text subtitle = CreateText("Cabinet manager for the MR environment", 8, FontStyle.Normal, GrayText, TextAnchor.MiddleCenter);
+        Text subtitle = CreateText("Configuration for the MR environment", 8, FontStyle.Normal, GrayText, TextAnchor.MiddleCenter);
         subtitle.transform.SetParent(header, false);
         AddLayout(subtitle.gameObject, -1f, 12f);
     }
@@ -491,14 +532,14 @@ public class CabinetManagerMRUI : MonoBehaviour
         AddImage(footer.gameObject, FooterBg);
         AddBoxBorder(footer, 1f, NeonGreen, top: true, bottom: false, left: false, right: false);
 
-        Text text = CreateText("© 1990 CABINET MANAGER MR • Age Of Joy", 9, FontStyle.Normal, GrayText, TextAnchor.MiddleCenter);
+        Text text = CreateText("© 1990 MR CONFIGURATION • Age Of Joy", 9, FontStyle.Normal, GrayText, TextAnchor.MiddleCenter);
         text.transform.SetParent(footer, false);
         Stretch(text.rectTransform);
     }
 
     RectTransform BuildSidebar(RectTransform parent)
     {
-        RectTransform sidebar = CreateLayoutRect("Sidebar", parent, -1f, 0.26f);
+        RectTransform sidebar = CreateLayoutRect("Sidebar", parent, -1f, 0.15f);
         AddImage(sidebar.gameObject, SidebarBg);
         AddBoxBorder(sidebar, 1f, NeonGreen, top: false, bottom: false, left: false, right: true);
 
@@ -521,7 +562,7 @@ public class CabinetManagerMRUI : MonoBehaviour
 
     RectTransform BuildContent(RectTransform parent)
     {
-        RectTransform content = CreateLayoutRect("Content", parent, -1f, 0.74f);
+        RectTransform content = CreateLayoutRect("Content", parent, -1f, 0.85f);
         AddImage(content.gameObject, ContentBg);
 
         return content;
@@ -1202,7 +1243,7 @@ public class CabinetManagerMRUI : MonoBehaviour
         {
             thumbnailRenderTexture = new RenderTexture(192, 108, 0, RenderTextureFormat.ARGB32)
             {
-                name = "CabinetManagerMRUI_ThumbRT",
+                name = "MRConfigurationUI_ThumbRT",
                 useMipMap = false,
                 autoGenerateMips = false
             };
@@ -1211,7 +1252,7 @@ public class CabinetManagerMRUI : MonoBehaviour
 
         if (thumbnailVideoHost == null)
         {
-            thumbnailVideoHost = new GameObject("CabinetManagerMRUI_ThumbnailVideo");
+            thumbnailVideoHost = new GameObject("MRConfigurationUI_ThumbnailVideo");
             thumbnailVideoHost.transform.SetParent(transform, false);
             thumbnailVideoHost.hideFlags = HideFlags.DontSave;
         }
@@ -1554,7 +1595,7 @@ public class CabinetManagerMRUI : MonoBehaviour
         {
             previewRenderTexture = new RenderTexture(192, 108, 0, RenderTextureFormat.ARGB32)
             {
-                name = "CabinetManagerMRUI_PreviewRT",
+                name = "MRConfigurationUI_PreviewRT",
                 useMipMap = false,
                 autoGenerateMips = false
             };
@@ -1563,7 +1604,7 @@ public class CabinetManagerMRUI : MonoBehaviour
 
         if (playVideoHost == null)
         {
-            playVideoHost = new GameObject("CabinetManagerMRUI_PlayVideo");
+            playVideoHost = new GameObject("MRConfigurationUI_PlayVideo");
             playVideoHost.transform.SetParent(transform, false);
             playVideoHost.hideFlags = HideFlags.DontSave;
         }
