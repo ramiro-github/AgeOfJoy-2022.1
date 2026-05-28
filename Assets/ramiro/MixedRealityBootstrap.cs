@@ -8,7 +8,8 @@ using UnityEngine.SceneManagement;
 public static class MixedRealityBootstrap
 {
     const string RootName = "MixedRealitySystem";
-    const string BootSceneName = "FixedScene";
+    static bool ShouldInstallForScene(string sceneName) =>
+        sceneName == "FixedScene" || sceneName == "TestMRmanager";
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Install()
@@ -17,7 +18,7 @@ public static class MixedRealityBootstrap
             return;
 
         Scene active = SceneManager.GetActiveScene();
-        if (active.name != BootSceneName)
+        if (!ShouldInstallForScene(active.name))
             return;
 
         var root = new GameObject(RootName);

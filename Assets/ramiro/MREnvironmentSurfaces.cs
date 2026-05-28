@@ -29,6 +29,14 @@ public class MREnvironmentSurfaces : MonoBehaviour
     [SerializeField] float floorRayStartAboveMeters = 2.0f;
     [Tooltip("Max length of the floor raycast (meters).")]
     [SerializeField] float floorRayMaxDistanceMeters = 6.0f;
+    [Tooltip("How far the frame sits off the wall surface (meters).")]
+    [SerializeField] float wallSurfaceOffsetMeters = 0.015f;
+    [Tooltip("Max horizontal ray distance when searching for a wall mount.")]
+    [SerializeField] float wallMountMaxRayDistanceMeters = 4f;
+    [Tooltip("Extra Y offset from the camera/eye anchor when wall-mounting.")]
+    [SerializeField] float wallMountEyeHeightOffsetMeters = 0f;
+    [Tooltip("Additional yaw probes (degrees) if the forward ray misses a wall.")]
+    [SerializeField] float wallMountHorizontalSpreadDegrees = 30f;
 
     static int physicsFloorLayerMask = -1;
     static int PhysicsFloorMask
@@ -264,6 +272,128 @@ public class MREnvironmentSurfaces : MonoBehaviour
     }
 
     /// <summary>
+    /// Pose for a wall-mounted MR frame at the player's eye height.
+    /// Raycasts horizontally from the camera to the nearest wall; rotation stays flush to the wall
+    /// (yaw locked to the wall normal) with the visible side facing into the room.
+    /// </summary>
+    public bool TryGetWallMountedFramePose(
+        Transform player,
+        float maxDistanceMeters,
+        float frameDepthMeters,
+        out Vector3 worldPosition,
+        out Quaternion worldRotation)
+    {
+        worldPosition = Vector3.zero;
+        worldRotation = Quaternion.identity;
+
+        if (player == null)
+            return false;
+
+        ResolveViewpoint(player, out Vector3 eye, out Vector3 viewForward);
+        float mountY = eye.y + wallMountEyeHeightOffsetMeters;
+        eye.y = mountY;
+
+        if (TryFindWallHitAtEye(eye, viewForward, maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal)
+            || TryFindWallHitAtEye(eye, Quaternion.Euler(0f, wallMountHorizontalSpreadDegrees, 0f) * viewForward, maxDistanceMeters, out wallPoint, out wallNormal)
+            || TryFindWallHitAtEye(eye, Quaternion.Euler(0f, -wallMountHorizontalSpreadDegrees, 0f) * viewForward, maxDistanceMeters, out wallPoint, out wallNormal))
+        {
+            Vector3 intoRoom = HorizontalNormal(wallNormal);
+            if (intoRoom.sqrMagnitude < 0.001f)
+                intoRoom = HorizontalForward(viewForward);
+            intoRoom = EnsureHorizontalNormalTowardViewpoint(wallPoint, intoRoom, eye);
+
+            float halfDepth = Mathf.Max(0f, frameDepthMeters) * 0.5f;
+            float depthOffset = wallSurfaceOffsetMeters + halfDepth;
+            worldPosition = wallPoint + intoRoom * depthOffset;
+            worldPosition.y = mountY;
+            worldRotation = RotationFlushToWall(intoRoom);
+
+            ConfigManager.WriteConsole(
+                $"{LogPrefix} wall frame pose hit={wallPoint} placement={worldPosition} " +
+                $"normal={intoRoom} depth={depthOffset:F3} eyeY={eye.y:F2} " +
+                $"room={(room != null ? room.gameObject.name : "null")}");
+            return true;
+        }
+
+        Vector3 fallbackForward = HorizontalForward(viewForward);
+        worldPosition = eye + fallbackForward * maxDistanceMeters;
+        worldPosition.y = mountY;
+        worldRotation = Quaternion.LookRotation(-fallbackForward, Vector3.up);
+
+        ConfigManager.WriteConsoleWarning(
+            $"{LogPrefix} wall frame pose fallback placement={worldPosition} (no wall hit)");
+        return true;
+    }
+
+    bool TryFindWallHitAtEye(Vector3 eye, Vector3 lookDirection, float maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal)
+    {
+        wallPoint = default;
+        wallNormal = default;
+
+        Vector3 direction = HorizontalForward(lookDirection);
+        float rayDistance = Mathf.Max(0.5f, Mathf.Min(maxDistanceMeters, wallMountMaxRayDistanceMeters));
+        Ray ray = new Ray(eye, direction);
+
+        if (room != null)
+        {
+            Pose pose = room.GetBestPoseFromRaycast(
+                ray,
+                rayDistance,
+                WallLabelFilter,
+                out MRUKAnchor hitAnchor,
+                out _,
+                MRUK.PositioningMethod.DEFAULT);
+
+            if (hitAnchor != null)
+            {
+                wallPoint = pose.position;
+                wallNormal = pose.rotation * Vector3.forward;
+                if (wallNormal.sqrMagnitude < 0.001f)
+                    wallNormal = HorizontalNormal(hitAnchor.transform.forward);
+                return true;
+            }
+
+            float dist = room.TryGetClosestSurfacePosition(
+                ray.origin + direction * rayDistance,
+                out Vector3 closest,
+                out _,
+                out Vector3 normal,
+                WallLabelFilter);
+            if (FoundSurface(dist) && IsWallNormal(normal))
+            {
+                wallPoint = closest;
+                wallNormal = normal;
+                return true;
+            }
+        }
+
+        if (TryHitWall(ray, rayDistance, out MRSurfaceHit hit))
+        {
+            wallPoint = hit.point;
+            wallNormal = hit.normal;
+            return true;
+        }
+
+        return false;
+    }
+
+    static Vector3 HorizontalForward(Vector3 forward)
+    {
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.001f)
+            forward = Vector3.forward;
+        return forward.normalized;
+    }
+
+    static Vector3 HorizontalNormal(Vector3 normal)
+    {
+        normal.y = 0f;
+        if (normal.sqrMagnitude < 0.001f)
+            return Vector3.forward;
+        return normal.normalized;
+    }
+
+    /// <summary>
     /// Vertically project a horizontal point onto the MRUK floor of the current room.
     /// Uses GetBestPoseFromRaycast straight DOWN to stay on the actual floor plane.
     /// </summary>
@@ -446,6 +576,26 @@ public class MREnvironmentSurfaces : MonoBehaviour
         return Quaternion.LookRotation(toPlayer.normalized, Vector3.up);
     }
 
+    static Vector3 EnsureHorizontalNormalTowardViewpoint(Vector3 surfacePoint, Vector3 horizontalNormal, Vector3 viewpoint)
+    {
+        Vector3 toViewpoint = viewpoint - surfacePoint;
+        toViewpoint.y = 0f;
+        if (toViewpoint.sqrMagnitude > 0.001f && Vector3.Dot(horizontalNormal, toViewpoint) < 0f)
+            horizontalNormal = -horizontalNormal;
+        return horizontalNormal;
+    }
+
+    /// <summary>
+    /// Same convention as MRConfigurationUI floating spawn: +Z into the room, panel flush to the wall.
+    /// </summary>
+    static Quaternion RotationFlushToWall(Vector3 intoRoom)
+    {
+        if (intoRoom.sqrMagnitude < 0.001f)
+            return Quaternion.identity;
+
+        return Quaternion.LookRotation(intoRoom.normalized, Vector3.up);
+    }
+
     bool TryHitFloor(Ray ray, float maxDistance, out MRSurfaceHit hit)
     {
         if (TryCast(ray, maxDistance, out hit) && IsFloorNormal(hit.normal))
@@ -523,6 +673,36 @@ public class MREnvironmentSurfaces : MonoBehaviour
 
         var tagged = GameObject.FindGameObjectWithTag("Player");
         return tagged != null ? tagged.transform : null;
+    }
+
+    /// <summary>Head/camera world position and horizontal view direction (not floor rig).</summary>
+    void ResolveViewpoint(Transform player, out Vector3 eyePosition, out Vector3 viewForward)
+    {
+        if (Camera.main != null)
+        {
+            Transform cam = Camera.main.transform;
+            eyePosition = cam.position;
+            viewForward = cam.forward;
+            return;
+        }
+
+        var pc = FindObjectOfType<PlayerController>();
+        if (pc != null && pc.xrorigin != null && pc.xrorigin.Camera != null)
+        {
+            Transform cam = pc.xrorigin.Camera.transform;
+            eyePosition = cam.position;
+            viewForward = cam.forward;
+            return;
+        }
+
+        viewForward = player != null ? player.forward : Vector3.forward;
+        viewForward.y = 0f;
+        if (viewForward.sqrMagnitude < 0.001f)
+            viewForward = Vector3.forward;
+        viewForward.Normalize();
+
+        Vector3 basePos = player != null ? player.position : Vector3.zero;
+        eyePosition = basePos + Vector3.up * editorEstimatedEyeHeightMeters;
     }
 
     struct MRSurfaceHit

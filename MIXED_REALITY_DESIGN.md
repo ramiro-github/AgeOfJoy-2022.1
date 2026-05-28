@@ -7,7 +7,7 @@
 | **Projeto** | [curif/AgeOfJoy-2022.1](https://github.com/curif/AgeOfJoy-2022.1) |
 | **Versão de referência** | [0.5.0](https://github.com/curif/AgeOfJoy-2022.1/tree/0.5.0) |
 | **Licença** | GPL-3.0 |
-| **Status** | Proposta de feature comunitária (não implementada no código atual) |
+| **Status** | Implementação em progresso na branch 0.5.0 (MVP parcial já funcional) |
 | **Documento** | v1.0 — Maio de 2026 |
 
 ---
@@ -37,9 +37,10 @@ Simulador de fliperama em VR para Meta Quest, feito em Unity (C#), com máquinas
 
 ### 2.3 Estado atual em relação ao MR
 
-- **Não existe** implementação de passthrough, MR ou occlusão no repositório analisado.
-- **Não há** issues abertas no GitHub especificamente sobre Mixed Reality / passthrough.
-- Contribuidores devem alinhar branch com `main` ou tag `0.5.0` antes de implementar.
+- Já existe implementação MR funcional em `Assets/ramiro/` (passthrough, modos, layout e menu CRT).
+- Fluxo principal de edição usa `ConfigurationCabinetMiniMR` com estética VR (CRT + ficha), sem depender de uGUI wall-mounted.
+- `mr-layout.yaml` é usado para persistência Add/Remove no modo MR.
+- Occlusão avançada e anchor persistente ainda permanecem como fases futuras.
 
 ### 2.4 Princípio de contribuição (`Contributing.md`)
 
