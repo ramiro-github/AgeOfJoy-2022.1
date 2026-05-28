@@ -20,12 +20,14 @@ public static class MRVrSystemsGate
         TeardownDeployedVrCabinets();
         DisableVrCabinetControllers();
         EnsureHandModelsVisible();
+        SuspendPlayerLocomotion();
         ResetLegacyPassthroughState();
     }
 
     public static void ResumeForVR()
     {
         ConfigManager.WriteConsole($"{LogPrefix} ResumeForVR (VR scenes reload separately)");
+        ResumePlayerLocomotion();
         ResetLegacyPassthroughState();
     }
 
@@ -82,13 +84,41 @@ public static class MRVrSystemsGate
             EventManager.Instance.IsPassthrough = false;
     }
 
+    static ChangeControls FindChangeControls()
+    {
+        return Object.FindObjectOfType<ChangeControls>(true);
+    }
+
     static void EnsureHandModelsVisible()
     {
-        var changeControls = Object.FindObjectOfType<ChangeControls>(true);
+        ChangeControls changeControls = FindChangeControls();
         if (changeControls == null)
             return;
 
         changeControls.PlayerMode(false);
         ConfigManager.WriteConsole($"{LogPrefix} hand models restored for MR");
+    }
+
+    static void SuspendPlayerLocomotion()
+    {
+        ChangeControls changeControls = FindChangeControls();
+        if (changeControls == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} ChangeControls not found — MR locomotion not suspended");
+            return;
+        }
+
+        changeControls.SetMrLocomotionSuspended(true);
+        ConfigManager.WriteConsole($"{LogPrefix} player locomotion suspended for MR");
+    }
+
+    static void ResumePlayerLocomotion()
+    {
+        ChangeControls changeControls = FindChangeControls();
+        if (changeControls == null)
+            return;
+
+        changeControls.SetMrLocomotionSuspended(false);
+        ConfigManager.WriteConsole($"{LogPrefix} player locomotion restored for VR");
     }
 }
