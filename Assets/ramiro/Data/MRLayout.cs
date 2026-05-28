@@ -35,6 +35,15 @@ public class MRQuaternion
 }
 
 [Serializable]
+public enum PlacementSurfaceType
+{
+    Floor = 0,
+    Wall = 1,
+    Ceiling = 2,
+    Free3D = 3
+}
+
+[Serializable]
 public class MRCabinetPlacement
 {
     public string Id;
@@ -43,6 +52,9 @@ public class MRCabinetPlacement
     public MRVector3 Position;
     public MRQuaternion Rotation;
     public float Scale = 1f;
+    public PlacementSurfaceType SurfaceType = PlacementSurfaceType.Floor;
+    /// <summary>Local axis that points toward the viewer when placed (NegativeZ = Unity default mesh with Z as back).</summary>
+    public PlacementFacingAxis FacingAxis = PlacementFacingAxis.PositiveZ;
 
     public string DisplayLabel =>
         string.IsNullOrEmpty(CabinetDBName) ? Id : CabinetDBName;

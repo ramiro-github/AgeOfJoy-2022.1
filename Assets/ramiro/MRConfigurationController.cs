@@ -44,12 +44,15 @@ public class MRConfigurationController : MonoBehaviour
 
     MRLayoutRegistry registry;
     Transform mrSpaceOrigin;
+    MRPlacementRayController placementRay;
 
     Screen currentScreen = Screen.Idle;
     int selectedListIndex;
     int listScrollOffset;
     float navCooldown;
     bool sessionActive;
+    bool placementMoveActive;
+    string movingPlacementId;
 
     public bool IsSessionActive => sessionActive;
 
@@ -89,6 +92,7 @@ public class MRConfigurationController : MonoBehaviour
 
         registry = EnsureRegistry();
         mrSpaceOrigin = EnsureMrSpaceOrigin();
+        placementRay = EnsurePlacementRayController();
         registry.EnsureLayoutLoaded();
         registry.SpawnAll(mrSpaceOrigin);
 
@@ -96,9 +100,9 @@ public class MRConfigurationController : MonoBehaviour
         RefreshCatalog();
 
         setupActionMap();
+        sessionActive = true;
         coinSlot?.insertCoin();
 
-        sessionActive = true;
         currentScreen = Screen.NavMain;
         navMenu.selectedIndex = 0;
         navMenu.Deselect();
@@ -110,6 +114,8 @@ public class MRConfigurationController : MonoBehaviour
     public void EndSession()
     {
         sessionActive = false;
+        placementMoveActive = false;
+        movingPlacementId = null;
         currentScreen = Screen.Idle;
         cleanActionMap();
         ActivateShader(false);
@@ -120,6 +126,9 @@ public class MRConfigurationController : MonoBehaviour
     void Update()
     {
         if (!sessionActive || screen == null)
+            return;
+
+        if (placementMoveActive)
             return;
 
         navCooldown -= Time.deltaTime;
@@ -156,6 +165,7 @@ public class MRConfigurationController : MonoBehaviour
         navMenu = new GenericMenu(screen, "MR CONFIGURATION");
         navMenu.AddOption("CABINETS", "Catalog: add or remove in MR space");
         navMenu.AddOption("ADDED", "Cabinets in mr-layout.yaml");
+        navMenu.AddOption("MOVE CONFIG", "Reposition ConfigurationCabinetMiniMR");
         navMenu.AddOption("HELP", "Controls");
         navMenu.AddOption("EXIT", "Close panel");
     }
@@ -287,7 +297,7 @@ public class MRConfigurationController : MonoBehaviour
         screen.Print(2, 7, "B: back / close panel", false);
         screen.Print(2, 10, "Catalog = cabinetsdb/", false);
         screen.Print(2, 11, "In Scene = mr-layout.yaml", false);
-        DrawFooter("B: back");
+        DrawFooter("A: move   B: back");
     }
 
     void ShowIdle()
@@ -362,6 +372,9 @@ public class MRConfigurationController : MonoBehaviour
                 RefreshCatalog();
                 DrawCurrentScreen();
                 break;
+            case Screen.Added:
+                BeginMoveSelectedPlacement();
+                break;
         }
     }
 
@@ -382,6 +395,9 @@ public class MRConfigurationController : MonoBehaviour
             case "HELP":
                 currentScreen = Screen.Help;
                 break;
+            case "MOVE CONFIG":
+                MRConfigurationCabinetController.Instance?.BeginRepositionWithRay();
+                return;
             case "EXIT":
                 MRConfigurationCabinetController.Instance?.CloseEdit();
                 return;
@@ -428,6 +444,51 @@ public class MRConfigurationController : MonoBehaviour
             if (registry.TryAddCabinetToScene(cabinetName, mrSpaceOrigin, worldPos, worldRot))
                 ConfigManager.WriteConsole($"{LogPrefix} added {cabinetName}");
         }
+    }
+
+    void BeginMoveSelectedPlacement()
+    {
+        if (registry == null || placementRay == null || placementMoveActive)
+            return;
+
+        if (selectedListIndex < 0 || selectedListIndex >= placements.Count)
+            return;
+
+        MRCabinetPlacement placement = placements[selectedListIndex];
+        if (placement == null || string.IsNullOrEmpty(placement.Id))
+            return;
+
+        if (!registry.TryGetSpawnedRoot(placement.Id, out GameObject spawnedRoot) || spawnedRoot == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} move skipped, spawned root missing for {placement.Id}");
+            return;
+        }
+
+        placementMoveActive = true;
+        movingPlacementId = placement.Id;
+
+        placementRay.BeginMove(
+            spawnedRoot,
+            placement.SurfaceType,
+            placement.FacingAxis,
+            confirmCallback: (worldPos, worldRot) =>
+            {
+                placementMoveActive = false;
+                bool saved = registry.TryUpdatePlacementPose(movingPlacementId, mrSpaceOrigin, worldPos, worldRot);
+                if (!saved)
+                    ConfigManager.WriteConsoleWarning($"{LogPrefix} move confirm but save failed ({movingPlacementId})");
+                movingPlacementId = null;
+                RefreshPlacements();
+                DrawCurrentScreen();
+            },
+            cancelCallback: () =>
+            {
+                placementMoveActive = false;
+                movingPlacementId = null;
+                DrawCurrentScreen();
+            });
+
+        ConfigManager.WriteConsole($"{LogPrefix} move begin {placement.DisplayLabel} ({placement.Id})");
     }
 
     void ClampListScroll()
@@ -549,6 +610,16 @@ public class MRConfigurationController : MonoBehaviour
 
         var go = new GameObject("MRSpaceOrigin_TestUI");
         return go.transform;
+    }
+
+    MRPlacementRayController EnsurePlacementRayController()
+    {
+        MRPlacementRayController existing = FindObjectOfType<MRPlacementRayController>();
+        if (existing != null)
+            return existing;
+
+        GameObject host = new GameObject("MRPlacementRayController");
+        return host.AddComponent<MRPlacementRayController>();
     }
 
     static string Truncate(string value, int maxLen)

@@ -136,6 +136,13 @@ public class MRLayoutRegistry : MonoBehaviour
         return layout?.FindByCabinetDBName(cabinetDBName);
     }
 
+    public bool TryGetPlacementById(string placementId, out MRCabinetPlacement placement)
+    {
+        EnsureLayoutLoaded();
+        placement = layout?.FindById(placementId);
+        return placement != null;
+    }
+
     /// <summary>All cabinet folders under cabinetsdb (same rule as GameRegistry: every subfolder).</summary>
     public static List<string> GetCatalogCabinetNames()
     {
@@ -201,7 +208,8 @@ public class MRLayoutRegistry : MonoBehaviour
             CabinetDBName = cabinetDBName,
             Position = MRVector3.From(mrSpaceOrigin.InverseTransformPoint(worldPosition)),
             Rotation = MRQuaternion.From(Quaternion.Inverse(mrSpaceOrigin.rotation) * worldRotation),
-            Scale = 1f
+            Scale = 1f,
+            SurfaceType = PlacementSurfaceType.Floor
         };
 
         layout.AddPlacement(placement);
@@ -216,6 +224,31 @@ public class MRLayoutRegistry : MonoBehaviour
         }
 
         ConfigManager.WriteConsole($"{LogPrefix} added {cabinetDBName} ({placement.Id})");
+        return true;
+    }
+
+    public bool TryUpdatePlacementPose(
+        string placementId,
+        Transform mrSpaceOrigin,
+        Vector3 worldPosition,
+        Quaternion worldRotation)
+    {
+        EnsureLayoutLoaded();
+        if (layout == null || string.IsNullOrEmpty(placementId) || mrSpaceOrigin == null)
+            return false;
+
+        MRCabinetPlacement placement = layout.FindById(placementId);
+        if (placement == null)
+            return false;
+
+        placement.Position = MRVector3.From(mrSpaceOrigin.InverseTransformPoint(worldPosition));
+        placement.Rotation = MRQuaternion.From(Quaternion.Inverse(mrSpaceOrigin.rotation) * worldRotation);
+        layout.Save(LayoutFilePath);
+
+        if (TryGetSpawnedRoot(placementId, out GameObject root))
+            root.transform.SetPositionAndRotation(worldPosition, worldRotation);
+
+        ConfigManager.WriteConsole($"{LogPrefix} updated pose {placement.DisplayLabel} ({placementId})");
         return true;
     }
 

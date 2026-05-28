@@ -281,7 +281,8 @@ public class MREnvironmentSurfaces : MonoBehaviour
         float maxDistanceMeters,
         float frameDepthMeters,
         out Vector3 worldPosition,
-        out Quaternion worldRotation)
+        out Quaternion worldRotation,
+        PlacementFacingAxis facingAxis = PlacementFacingAxis.NegativeX)
     {
         worldPosition = Vector3.zero;
         worldRotation = Quaternion.identity;
@@ -306,7 +307,7 @@ public class MREnvironmentSurfaces : MonoBehaviour
             float depthOffset = wallSurfaceOffsetMeters + halfDepth;
             worldPosition = wallPoint + intoRoom * depthOffset;
             worldPosition.y = mountY;
-            worldRotation = RotationFlushToWall(intoRoom);
+            worldRotation = PlacementOrientation.LookRotationWithFacing(intoRoom, facingAxis, Vector3.up);
 
             ConfigManager.WriteConsole(
                 $"{LogPrefix} wall frame pose hit={wallPoint} placement={worldPosition} " +
@@ -318,11 +319,48 @@ public class MREnvironmentSurfaces : MonoBehaviour
         Vector3 fallbackForward = HorizontalForward(viewForward);
         worldPosition = eye + fallbackForward * maxDistanceMeters;
         worldPosition.y = mountY;
-        worldRotation = Quaternion.LookRotation(-fallbackForward, Vector3.up);
+        worldRotation = PlacementOrientation.LookRotationWithFacing(-fallbackForward, facingAxis, Vector3.up);
 
         ConfigManager.WriteConsoleWarning(
             $"{LogPrefix} wall frame pose fallback placement={worldPosition} (no wall hit)");
         return true;
+    }
+
+    /// <summary>
+    /// Wall-mounted pose using an explicit ray (e.g. controller pointer), preserving hit height.
+    /// </summary>
+    public bool TryGetWallMountedFramePoseFromRay(
+        Vector3 rayOrigin,
+        Vector3 rayDirection,
+        float maxDistanceMeters,
+        float frameDepthMeters,
+        out Vector3 worldPosition,
+        out Quaternion worldRotation,
+        PlacementFacingAxis facingAxis = PlacementFacingAxis.NegativeX)
+    {
+        worldPosition = Vector3.zero;
+        worldRotation = Quaternion.identity;
+
+        Vector3 direction = HorizontalForward(rayDirection);
+        if (direction.sqrMagnitude < 0.001f)
+            return false;
+
+        if (TryFindWallHitAtEye(rayOrigin, direction, maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal))
+        {
+            Vector3 intoRoom = HorizontalNormal(wallNormal);
+            if (intoRoom.sqrMagnitude < 0.001f)
+                intoRoom = HorizontalForward(direction);
+            intoRoom = EnsureHorizontalNormalTowardViewpoint(wallPoint, intoRoom, rayOrigin);
+
+            float halfDepth = Mathf.Max(0f, frameDepthMeters) * 0.5f;
+            float depthOffset = wallSurfaceOffsetMeters + halfDepth;
+            worldPosition = wallPoint + intoRoom * depthOffset;
+            worldPosition.y = wallPoint.y;
+            worldRotation = PlacementOrientation.LookRotationWithFacing(intoRoom, facingAxis, Vector3.up);
+            return true;
+        }
+
+        return false;
     }
 
     bool TryFindWallHitAtEye(Vector3 eye, Vector3 lookDirection, float maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal)
@@ -583,17 +621,6 @@ public class MREnvironmentSurfaces : MonoBehaviour
         if (toViewpoint.sqrMagnitude > 0.001f && Vector3.Dot(horizontalNormal, toViewpoint) < 0f)
             horizontalNormal = -horizontalNormal;
         return horizontalNormal;
-    }
-
-    /// <summary>
-    /// Same convention as MRConfigurationUI floating spawn: +Z into the room, panel flush to the wall.
-    /// </summary>
-    static Quaternion RotationFlushToWall(Vector3 intoRoom)
-    {
-        if (intoRoom.sqrMagnitude < 0.001f)
-            return Quaternion.identity;
-
-        return Quaternion.LookRotation(intoRoom.normalized, Vector3.up);
     }
 
     bool TryHitFloor(Ray ray, float maxDistance, out MRSurfaceHit hit)

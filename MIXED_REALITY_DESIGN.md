@@ -336,6 +336,8 @@ Em `MR_EDIT`, o jogador abre um **painel na mão** com:
 - Selecionar → highlight no mundo (outline ou emissivo)
 - **REMOVER** → confirmação (“Ejetar máquina?”) → remove YAML + `Destroy`
 - **MOVER** (opcional fase 2c) → modo raio de reposicionamento
+- Seleção/reposicionamento é **universal** para objetos já posicionados:
+  inclui cabinets de jogo e também o próprio `ConfigurationCabinetMiniMR`.
 
 **Tela B — “CATÁLOGO”**
 
@@ -372,6 +374,56 @@ sequenceDiagram
 3. **Rotação** — Stick horizontal ou snap 15°/90°.
 4. **Validação** — Hit inválido → fantasma vermelho; overlap → aviso; distância 0,5 m–4 m do jogador.
 5. **Confirmar / cancelar** — Trigger grava + spawn; Grip descarta preview.
+
+### 10.4.1 Regras por tipo de objeto (superfície de colocação)
+
+Nem todo objeto MR segue a mesma física de placement. O modo de mover/colocar deve usar
+uma regra por objeto, persistida no layout (ou inferida por tipo).
+
+**Estrutura sugerida (extensível):**
+
+- `PlacementSurfaceType.Floor`
+- `PlacementSurfaceType.Wall`
+- `PlacementSurfaceType.Ceiling` (futuro)
+- `PlacementSurfaceType.Free3D` (futuro)
+
+### 10.4.2 Casos iniciais obrigatórios (MVP)
+
+1. **`ConfigurationCabinetMiniMR` (parede)**
+   - Tipo: `Wall`.
+   - Ao abrir mover/placement, o alvo deve procurar parede válida (`MRUK WALL_FACE` / fallback).
+   - Durante o aiming, o preview deve **deslizar sobre a parede** (mantendo flush na normal da parede).
+   - Orientação padrão: aplicar auto-correção de facing para nunca ficar "de costas" para o jogador.
+   - `wallMountYawOffsetDegrees` deve ser apenas ajuste fino de prefab (faixa pequena, ex. `[-30, 30]`, default `0`).
+   - Confirmar: salvar posição/rotação no layout e reaplicar ao carregar sessão seguinte.
+
+2. **Cabinet de jogo (chão)**
+   - Tipo: `Floor`.
+   - Ao mover/colocar, o preview deve **deslizar no chão** (snap no piso, sem flutuar).
+   - Ajuste de base: usar `PlaceOnFloorFromBoxCollider` (ou equivalente) para manter contato com piso.
+   - Confirmar: salvar posição/rotação no layout e respawnar na mesma pose ao reentrar em MR.
+
+### 10.4.3 Contrato de persistência para move
+
+- `add`, `delete` e `move` devem auto-salvar `mr-layout.yaml`.
+- `move` deve atualizar a entrada existente por `id` (não recriar id).
+- Na próxima entrada em MR, `SpawnAll` deve usar a pose persistida e respeitar `PlacementSurfaceType`.
+- O comando **Mover** deve aceitar qualquer item da lista "No ambiente", inclusive `ConfigurationCabinetMiniMR`.
+
+### 10.4.4 Regra de entrada no placement (primeira vez vs já posicionado)
+
+- **Objeto sem pose salva (unplaced):**
+  - Ao criar/adicionar no MR pela primeira vez, iniciar o modo raio imediatamente.
+  - O jogador confirma a pose inicial; só então grava no `mr-layout.yaml`.
+
+- **Objeto com pose salva (placed):**
+  - Ao entrar na sessão MR, carregar/spawnar diretamente na última pose salva.
+  - Não abrir raio automaticamente.
+
+- **Reposicionamento explícito (move requested):**
+  - Mesmo para objeto já colocado, abrir raio apenas quando o jogador escolher **Mover**.
+  - Confirmar atualiza a mesma entrada (`id`) no layout.
+  - Isso também vale para o próprio `ConfigurationCabinetMiniMR` (reposicionar a parede quando necessário).
 
 ### 10.5 Mapeamento de mãos (recomendado)
 
@@ -451,8 +503,14 @@ stateDiagram-v2
     MR_Play --> MR_Edit : Abrir UI edição
     MR_Edit --> MR_Play : Fechar UI
     MR_Play --> VR_Gallery : Troca imersiva
-    MR_Edit --> MR_Placing : Adicionar / Mover
-    MR_Placing --> MR_Edit : Confirmar ou Cancelar
+    MR_Edit --> MR_Placing_Unplaced : Adicionar (sem pose salva)
+    MR_Edit --> MR_Placing_MoveRequested : Mover (já posicionado)
+    MR_Placing_Unplaced --> MR_Placed : Confirmar placement inicial
+    MR_Placing_Unplaced --> MR_Edit : Cancelar
+    MR_Placed --> MR_Edit : Carregado automaticamente no spawn
+    MR_Placed --> MR_Placing_MoveRequested : Reposicionar
+    MR_Placing_MoveRequested --> MR_Placed : Confirmar nova pose
+    MR_Placing_MoveRequested --> MR_Edit : Cancelar
     MR_Edit --> MR_Delete : Remover selecionado
     MR_Delete --> MR_Edit : Confirmar
 ```
@@ -467,7 +525,7 @@ stateDiagram-v2
 | **1** | Passthrough + `ExperienceMode` + toggle imersivo | Alterna VR/MR sem crash; MR sem cabinets |
 | **2a** | `mr-layout.yaml` + spawn ao entrar MR | Cabinets aparecem nas poses salvas |
 | **2b** | UI na mão: listar + deletar | Remove do ambiente e persiste |
-| **2c** | Raio + preview + adicionar (+ mover) | Colocação completa na mão |
+| **2c** | Raio + preview + adicionar (+ mover) | Colocação completa na mão com regras por superfície (Wall/Floor) |
 | **3** | Occlusão por paredes reais | Cabinets atrás de paredes são tampados |
 | **4** | Spatial Anchor Meta | Layout estável entre sessões |
 | **5** | Polish: limites, performance, Quest 2 doc | Testes comunitários |
