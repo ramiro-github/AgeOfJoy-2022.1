@@ -9,6 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 7524058235202397351}
+  - component: {fileID: 4540932106278939656}
   m_Layer: 0
   m_Name: ConfigurationCabinetMiniMR
   m_TagString: Untagged
@@ -43,6 +44,24 @@ Transform:
   - {fileID: 455568911207242214}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &4540932106278939656
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 470792561167502027}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7c3e891024b4f6a9d2e8f1b5c6d7e8f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  surfaceType: 1
+  facingAxis: 3
+  allowStickRotation: 0
+  stickRotationAxis: 0
+  stickRotationSpeed: 90
+  displayName: Configuration MR
 --- !u!1 &605558834873445400
 GameObject:
   m_ObjectHideFlags: 0

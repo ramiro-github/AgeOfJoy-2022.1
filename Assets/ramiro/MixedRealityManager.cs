@@ -132,10 +132,11 @@ public class MixedRealityManager : MonoBehaviour
         if (environmentSurfaces != null && MRSpaceOrigin != null)
             environmentSurfaces.AlignOriginToFloor(MRSpaceOrigin, player);
 
+        SetMode(ExperienceMode.MR);
+
         mrLighting?.Spawn(MRSpaceOrigin);
         layoutRegistry?.SpawnAll(MRSpaceOrigin);
         MRConfigurationCabinetController.Instance?.SpawnAtMrOrigin();
-        SetMode(ExperienceMode.MR);
 
         transitionInProgress = false;
         ConfigManager.WriteConsole($"{LogPrefix} EnterMR done");

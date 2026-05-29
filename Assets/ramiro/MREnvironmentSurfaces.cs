@@ -294,9 +294,9 @@ public class MREnvironmentSurfaces : MonoBehaviour
         float mountY = eye.y + wallMountEyeHeightOffsetMeters;
         eye.y = mountY;
 
-        if (TryFindWallHitAtEye(eye, viewForward, maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal)
-            || TryFindWallHitAtEye(eye, Quaternion.Euler(0f, wallMountHorizontalSpreadDegrees, 0f) * viewForward, maxDistanceMeters, out wallPoint, out wallNormal)
-            || TryFindWallHitAtEye(eye, Quaternion.Euler(0f, -wallMountHorizontalSpreadDegrees, 0f) * viewForward, maxDistanceMeters, out wallPoint, out wallNormal))
+        if (TryFindWallHitAtEye(eye, viewForward, maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal, out _)
+            || TryFindWallHitAtEye(eye, Quaternion.Euler(0f, wallMountHorizontalSpreadDegrees, 0f) * viewForward, maxDistanceMeters, out wallPoint, out wallNormal, out _)
+            || TryFindWallHitAtEye(eye, Quaternion.Euler(0f, -wallMountHorizontalSpreadDegrees, 0f) * viewForward, maxDistanceMeters, out wallPoint, out wallNormal, out _))
         {
             Vector3 intoRoom = HorizontalNormal(wallNormal);
             if (intoRoom.sqrMagnitude < 0.001f)
@@ -336,8 +336,10 @@ public class MREnvironmentSurfaces : MonoBehaviour
         float frameDepthMeters,
         out Vector3 worldPosition,
         out Quaternion worldRotation,
+        out MRUKAnchor hitAnchor,
         PlacementFacingAxis facingAxis = PlacementFacingAxis.NegativeX)
     {
+        hitAnchor = null;
         worldPosition = Vector3.zero;
         worldRotation = Quaternion.identity;
 
@@ -345,7 +347,7 @@ public class MREnvironmentSurfaces : MonoBehaviour
         if (direction.sqrMagnitude < 0.001f)
             return false;
 
-        if (TryFindWallHitAtEye(rayOrigin, direction, maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal))
+        if (TryFindWallHitAtEye(rayOrigin, direction, maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal, out hitAnchor))
         {
             Vector3 intoRoom = HorizontalNormal(wallNormal);
             if (intoRoom.sqrMagnitude < 0.001f)
@@ -363,8 +365,35 @@ public class MREnvironmentSurfaces : MonoBehaviour
         return false;
     }
 
-    bool TryFindWallHitAtEye(Vector3 eye, Vector3 lookDirection, float maxDistanceMeters, out Vector3 wallPoint, out Vector3 wallNormal)
+    public bool TryGetWallMountedFramePoseFromRay(
+        Vector3 rayOrigin,
+        Vector3 rayDirection,
+        float maxDistanceMeters,
+        float frameDepthMeters,
+        out Vector3 worldPosition,
+        out Quaternion worldRotation,
+        PlacementFacingAxis facingAxis = PlacementFacingAxis.NegativeX)
     {
+        return TryGetWallMountedFramePoseFromRay(
+            rayOrigin,
+            rayDirection,
+            maxDistanceMeters,
+            frameDepthMeters,
+            out worldPosition,
+            out worldRotation,
+            out _,
+            facingAxis);
+    }
+
+    bool TryFindWallHitAtEye(
+        Vector3 eye,
+        Vector3 lookDirection,
+        float maxDistanceMeters,
+        out Vector3 wallPoint,
+        out Vector3 wallNormal,
+        out MRUKAnchor hitAnchor)
+    {
+        hitAnchor = null;
         wallPoint = default;
         wallNormal = default;
 
@@ -378,7 +407,7 @@ public class MREnvironmentSurfaces : MonoBehaviour
                 ray,
                 rayDistance,
                 WallLabelFilter,
-                out MRUKAnchor hitAnchor,
+                out hitAnchor,
                 out _,
                 MRUK.PositioningMethod.DEFAULT);
 
@@ -488,6 +517,61 @@ public class MREnvironmentSurfaces : MonoBehaviour
         }
 
         return false;
+    }
+
+    /// <summary>Floor hit along a controller ray (MRUK floor filter), fallback to vertical probe at ray end.</summary>
+    public bool TryGetFloorPointFromRay(
+        Vector3 rayOrigin,
+        Vector3 rayDirection,
+        float maxDistanceMeters,
+        out Vector3 floorPoint,
+        out MRUKAnchor hitAnchor)
+    {
+        hitAnchor = null;
+        floorPoint = default;
+
+        Vector3 direction = rayDirection;
+        if (direction.sqrMagnitude < 0.001f)
+            return false;
+        direction.Normalize();
+
+        float rayDistance = Mathf.Max(0.5f, maxDistanceMeters);
+        Ray ray = new Ray(rayOrigin, direction);
+
+        if (room != null && HasFloor)
+        {
+            Pose pose = room.GetBestPoseFromRaycast(
+                ray,
+                rayDistance,
+                FloorLabelFilter,
+                out hitAnchor,
+                out _,
+                MRUK.PositioningMethod.DEFAULT);
+
+            if (hitAnchor != null)
+            {
+                floorPoint = pose.position;
+                return true;
+            }
+        }
+
+        Vector3 probe = rayOrigin + direction * rayDistance;
+        if (TryGetFloorPointAt(probe, out floorPoint))
+        {
+            hitAnchor = room?.FloorAnchor;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryGetFloorPointFromRay(
+        Vector3 rayOrigin,
+        Vector3 rayDirection,
+        float maxDistanceMeters,
+        out Vector3 floorPoint)
+    {
+        return TryGetFloorPointFromRay(rayOrigin, rayDirection, maxDistanceMeters, out floorPoint, out _);
     }
 
     public bool TryGetCeilingPointAt(Vector3 worldNear, out Vector3 ceilingPoint)

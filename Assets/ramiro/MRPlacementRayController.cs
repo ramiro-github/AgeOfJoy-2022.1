@@ -17,13 +17,20 @@ public class MRPlacementRayController : MonoBehaviour
     [Tooltip("Wall-only fine adjust after auto-facing fix. Keep near zero.")]
     [Range(-30f, 30f)]
     [SerializeField] float wallMountYawOffsetDegrees = 0f;
+    [SerializeField] float defaultStickRotationSpeed = 90f;
+    [SerializeField] float stickDeadZone = 0.15f;
     [SerializeField] Color validColor = new Color(0.2f, 1f, 0.35f, 1f);
     [SerializeField] Color invalidColor = new Color(1f, 0.25f, 0.25f, 1f);
 
     GameObject movingTarget;
     PlacementSurfaceType surfaceType;
     PlacementFacingAxis facingAxis = PlacementFacingAxis.PositiveZ;
-    Action<Vector3, Quaternion> onConfirmPose;
+    bool allowStickRotation;
+    PlacementStickRotationAxis stickRotationAxis = PlacementStickRotationAxis.WorldYaw;
+    float stickRotationSpeed;
+    float initialYawDegrees;
+    float userYawOffsetDegrees;
+    Action<Vector3, Quaternion, Guid> onConfirmPose;
     Action onCancel;
 
     LineRenderer line;
@@ -33,6 +40,7 @@ public class MRPlacementRayController : MonoBehaviour
     Vector3 previewPosition;
     Quaternion previewRotation;
     bool hasValidPreview;
+    Guid previewAnchorUuid = Guid.Empty;
 
     public bool IsActive => isActive;
 
@@ -40,15 +48,18 @@ public class MRPlacementRayController : MonoBehaviour
         GameObject target,
         PlacementSurfaceType placementSurfaceType,
         PlacementFacingAxis objectFacingAxis,
-        Action<Vector3, Quaternion> confirmCallback,
+        Action<Vector3, Quaternion, Guid> confirmCallback,
         Action cancelCallback = null)
     {
         if (target == null || confirmCallback == null)
             return;
 
+        MRPlacementProfile profile = MRPlacementProfile.Resolve(target);
+
         movingTarget = target;
         surfaceType = placementSurfaceType;
         facingAxis = objectFacingAxis;
+        ResolveStickRotation(profile, placementSurfaceType, out allowStickRotation, out stickRotationAxis, out stickRotationSpeed);
         onConfirmPose = confirmCallback;
         onCancel = cancelCallback;
 
@@ -57,19 +68,72 @@ public class MRPlacementRayController : MonoBehaviour
         previewPosition = startPosition;
         previewRotation = startRotation;
         hasValidPreview = false;
+        previewAnchorUuid = Guid.Empty;
+        initialYawDegrees = NormalizeYaw(startRotation.eulerAngles.y);
+        userYawOffsetDegrees = 0f;
 
         EnsureLineRenderer();
         SetLineVisible(true);
         isActive = true;
 
         ConfigManager.WriteConsole(
-            $"{LogPrefix} begin move target={target.name} surface={surfaceType} facing={facingAxis}");
+            $"{LogPrefix} begin move target={target.name} surface={surfaceType} facing={facingAxis} " +
+            $"stickRot={allowStickRotation} stickAxis={stickRotationAxis}");
+    }
+
+    public bool AllowsStickRotation => isActive && allowStickRotation;
+
+    public void CancelActive()
+    {
+        if (!isActive)
+            return;
+
+        if (movingTarget != null)
+            movingTarget.transform.SetPositionAndRotation(startPosition, startRotation);
+
+        StopMove(cancelled: true);
+    }
+
+    /// <summary>
+    /// Prefab profile wins when present. Floor objects without profile (game cabinets) default to world-Y stick rotation.
+    /// </summary>
+    void ResolveStickRotation(
+        MRPlacementProfile profile,
+        PlacementSurfaceType placementSurface,
+        out bool stickEnabled,
+        out PlacementStickRotationAxis rotationAxis,
+        out float rotationSpeed)
+    {
+        if (profile != null)
+        {
+            stickEnabled = profile.allowStickRotation;
+            rotationAxis = profile.stickRotationAxis;
+            rotationSpeed = profile.stickRotationSpeed > 0f
+                ? profile.stickRotationSpeed
+                : defaultStickRotationSpeed;
+            return;
+        }
+
+        // Game cabinets are not prefabs — floor placement defaults to yaw on world Y.
+        stickEnabled = placementSurface == PlacementSurfaceType.Floor;
+        rotationAxis = PlacementStickRotationAxis.WorldYaw;
+        rotationSpeed = defaultStickRotationSpeed;
+    }
+
+    public static bool ExpectsStickRotationHint(MRPlacementProfile profile, PlacementSurfaceType placementSurface)
+    {
+        if (profile != null)
+            return profile.allowStickRotation;
+        return placementSurface == PlacementSurfaceType.Floor;
     }
 
     void Update()
     {
         if (!isActive || movingTarget == null)
             return;
+
+        if (allowStickRotation)
+            ApplyStickRotationInput();
 
         UpdatePreviewPose();
         DrawRay();
@@ -84,7 +148,7 @@ public class MRPlacementRayController : MonoBehaviour
         if (WasConfirmPressed() && hasValidPreview)
         {
             movingTarget.transform.SetPositionAndRotation(previewPosition, previewRotation);
-            onConfirmPose?.Invoke(previewPosition, previewRotation);
+            onConfirmPose?.Invoke(previewPosition, previewRotation, previewAnchorUuid);
             StopMove(cancelled: false);
         }
     }
@@ -94,6 +158,7 @@ public class MRPlacementRayController : MonoBehaviour
         ResolvePointer(out Vector3 rayOrigin, out Vector3 rayDir, out Vector3 viewerPosition);
 
         bool ok = false;
+        Guid hitAnchorUuid = Guid.Empty;
         Vector3 worldPos = movingTarget.transform.position;
         Quaternion worldRot = movingTarget.transform.rotation;
 
@@ -103,6 +168,7 @@ public class MRPlacementRayController : MonoBehaviour
             case PlacementSurfaceType.Wall:
                 if (surfaces != null)
                 {
+                    Meta.XR.MRUtilityKit.MRUKAnchor wallAnchor = null;
                     ok = surfaces.TryGetWallMountedFramePoseFromRay(
                         rayOrigin,
                         rayDir,
@@ -110,33 +176,53 @@ public class MRPlacementRayController : MonoBehaviour
                         0.25f,
                         out worldPos,
                         out worldRot,
+                        out wallAnchor,
                         facingAxis);
                     if (ok)
                     {
+                        MRAnchorPoseResolver.TryGetUuid(wallAnchor, out hitAnchorUuid);
                         worldRot *= Quaternion.Euler(0f, wallMountYawOffsetDegrees, 0f);
+                        if (allowStickRotation)
+                        {
+                            worldRot = PlacementOrientation.ApplyStickRotationOffset(
+                                worldRot, stickRotationAxis, userYawOffsetDegrees);
+                        }
                     }
                 }
                 break;
 
             case PlacementSurfaceType.Floor:
             default:
-                Vector3 probe = rayOrigin + rayDir.normalized * maxDistanceMeters;
-                if (surfaces != null && surfaces.TryGetFloorPointAt(probe, out Vector3 floorPoint))
+                if (surfaces != null && surfaces.TryGetFloorPointFromRay(
+                        rayOrigin, rayDir, maxDistanceMeters, out Vector3 floorPoint, out Meta.XR.MRUtilityKit.MRUKAnchor floorAnchor))
                 {
+                    MRAnchorPoseResolver.TryGetUuid(floorAnchor, out hitAnchorUuid);
                     worldPos = floorPoint;
-                    Vector3 look = viewerPosition - worldPos;
-                    look.y = 0f;
-                    if (look.sqrMagnitude < 0.001f)
-                        look = Vector3.forward;
-                    worldRot = PlacementOrientation.LookRotationWithFacing(look, facingAxis, Vector3.up);
-                    worldRot = PlacementOrientation.EnsureFacingViewer(
-                        worldRot, facingAxis, worldPos, viewerPosition);
+                    if (allowStickRotation)
+                    {
+                        Quaternion baseYaw = Quaternion.Euler(0f, initialYawDegrees, 0f);
+                        worldRot = PlacementOrientation.ApplyStickRotationOffset(
+                            baseYaw, stickRotationAxis, userYawOffsetDegrees);
+                    }
+                    else
+                    {
+                        Vector3 look = viewerPosition - worldPos;
+                        look.y = 0f;
+                        if (look.sqrMagnitude < 0.001f)
+                            look = Vector3.forward;
+                        worldRot = PlacementOrientation.LookRotationWithFacing(look, facingAxis, Vector3.up);
+                        worldRot = PlacementOrientation.EnsureFacingViewer(
+                            worldRot, facingAxis, worldPos, viewerPosition);
+                    }
+
+                    ApplyFloorPivotOffset(movingTarget, ref worldPos, worldRot);
                     ok = true;
                 }
                 break;
         }
 
         hasValidPreview = ok;
+        previewAnchorUuid = hitAnchorUuid;
         previewPosition = worldPos;
         previewRotation = worldRot;
 
@@ -228,8 +314,58 @@ public class MRPlacementRayController : MonoBehaviour
         onConfirmPose = null;
         onCancel = null;
         hasValidPreview = false;
+        previewAnchorUuid = Guid.Empty;
 
         ConfigManager.WriteConsole($"{LogPrefix} end move cancelled={cancelled}");
+    }
+
+    static void ApplyFloorPivotOffset(GameObject target, ref Vector3 floorPoint, Quaternion worldRotation)
+    {
+        if (target == null)
+            return;
+
+        BoxCollider box = target.GetComponentInChildren<BoxCollider>();
+        if (box == null)
+            return;
+
+        Transform t = target.transform;
+        t.SetPositionAndRotation(
+            new Vector3(floorPoint.x, floorPoint.y, floorPoint.z),
+            worldRotation);
+
+        float bottomY = PlaceOnFloorFromBoxCollider.CalculateLowerPointY(t, box);
+        float pivotToBottom = t.position.y - bottomY;
+        floorPoint = new Vector3(floorPoint.x, floorPoint.y + pivotToBottom, floorPoint.z);
+    }
+
+    void ApplyStickRotationInput()
+    {
+        float stickX = ReadLeftStickX();
+        if (Mathf.Abs(stickX) <= stickDeadZone)
+            return;
+
+        userYawOffsetDegrees += stickX * stickRotationSpeed * Time.deltaTime;
+    }
+
+    static float ReadLeftStickX()
+    {
+#if UNITY_EDITOR
+        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+            return -1f;
+        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+            return 1f;
+        return Input.GetAxisRaw("Horizontal");
+#else
+        return OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch).x;
+#endif
+    }
+
+    static float NormalizeYaw(float yaw)
+    {
+        yaw %= 360f;
+        if (yaw < 0f)
+            yaw += 360f;
+        return yaw;
     }
 
     void EnsureLineRenderer()

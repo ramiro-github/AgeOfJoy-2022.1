@@ -10,12 +10,15 @@ using UnityEngine;
 
 /// <summary>
 /// MR cabinet layout (mr-layout.yaml). Phase 2b: load/save, spawn, delete.
+/// Placement Position/Rotation are anchor-local when AnchorUuid is set (v3+), otherwise world space (v2).
 /// VR registry.yaml is never modified by this class.
 /// </summary>
 public class MRLayoutRegistry : MonoBehaviour
 {
     const string LogPrefix = "[MRLayoutRegistry]";
     public const string LayoutFileName = "mr-layout.yaml";
+    public const int WorldSpaceLayoutVersion = 2;
+    public const int AnchorRelativeLayoutVersion = 3;
 
     public static MRLayoutRegistry Instance { get; private set; }
 
@@ -72,6 +75,8 @@ public class MRLayoutRegistry : MonoBehaviour
             ConfigManager.WriteConsole($"{LogPrefix} SpawnAll: layout empty ({LayoutFilePath})");
             return;
         }
+
+        EnsureWorldSpaceLayout(mrSpaceOrigin);
 
         int index = 0;
         foreach (MRCabinetPlacement placement in layout.GetCabinets())
@@ -190,7 +195,12 @@ public class MRLayoutRegistry : MonoBehaviour
     }
 
     /// <summary>Add to mr-layout.yaml and spawn in the MR space (MVP: one instance per cabinetDBName).</summary>
-    public bool TryAddCabinetToScene(string cabinetDBName, Transform mrSpaceOrigin, Vector3 worldPosition, Quaternion worldRotation)
+    public bool TryAddCabinetToScene(
+        string cabinetDBName,
+        Transform mrSpaceOrigin,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        Guid anchorUuid = default)
     {
         EnsureLayoutLoaded();
         if (layout == null || string.IsNullOrEmpty(cabinetDBName) || mrSpaceOrigin == null)
@@ -206,13 +216,12 @@ public class MRLayoutRegistry : MonoBehaviour
         {
             Id = $"{cabinetDBName}-{Guid.NewGuid():N}".Substring(0, Mathf.Min(48, cabinetDBName.Length + 33)),
             CabinetDBName = cabinetDBName,
-            Position = MRVector3.From(mrSpaceOrigin.InverseTransformPoint(worldPosition)),
-            Rotation = MRQuaternion.From(Quaternion.Inverse(mrSpaceOrigin.rotation) * worldRotation),
             Scale = 1f,
             SurfaceType = PlacementSurfaceType.Floor
         };
-
+        WriteStoredPose(placement, PlacementSurfaceType.Floor, worldPosition, worldRotation, anchorUuid);
         layout.AddPlacement(placement);
+        layout.Version = AnchorRelativeLayoutVersion;
         layout.Save(LayoutFilePath);
 
         int index = spawnedById.Count;
@@ -227,11 +236,105 @@ public class MRLayoutRegistry : MonoBehaviour
         return true;
     }
 
+    /// <summary>Spawn a game cabinet for floor placement ray — not saved to mr-layout until finalized.</summary>
+    public bool TrySpawnTransientCabinet(
+        string cabinetDBName,
+        Transform mrSpaceOrigin,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        out GameObject spawnedRoot)
+    {
+        spawnedRoot = null;
+        if (string.IsNullOrEmpty(cabinetDBName) || mrSpaceOrigin == null)
+            return false;
+
+        if (FindPlacementByCabinetDBName(cabinetDBName) != null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} already in layout: {cabinetDBName}");
+            return false;
+        }
+
+        int index = spawnedById.Count;
+        if (!TrySpawnCabinetAtWorldPose(
+                cabinetDBName,
+                mrSpaceOrigin,
+                worldPosition,
+                worldRotation,
+                index,
+                registerSpawned: false,
+                out spawnedRoot))
+            return false;
+
+        ConfigManager.WriteConsole($"{LogPrefix} transient spawn {cabinetDBName} for placement ray");
+        return true;
+    }
+
+    /// <summary>Commit a transient cabinet after floor placement ray confirm.</summary>
+    public bool TryFinalizeTransientCabinetAdd(
+        string cabinetDBName,
+        GameObject root,
+        Transform mrSpaceOrigin,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        Guid anchorUuid = default)
+    {
+        EnsureLayoutLoaded();
+        if (layout == null || string.IsNullOrEmpty(cabinetDBName) || root == null || mrSpaceOrigin == null)
+            return false;
+
+        if (FindPlacementByCabinetDBName(cabinetDBName) != null)
+        {
+            DestroyTransientCabinet(root);
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} finalize skipped, already in layout: {cabinetDBName}");
+            return false;
+        }
+
+        var placement = new MRCabinetPlacement
+        {
+            Id = $"{cabinetDBName}-{Guid.NewGuid():N}".Substring(0, Mathf.Min(48, cabinetDBName.Length + 33)),
+            CabinetDBName = cabinetDBName,
+            Scale = 1f,
+            SurfaceType = PlacementSurfaceType.Floor,
+            FacingAxis = PlacementFacingAxis.PositiveZ
+        };
+        WriteStoredPose(placement, PlacementSurfaceType.Floor, worldPosition, worldRotation, anchorUuid);
+
+        layout.AddPlacement(placement);
+        layout.Version = AnchorRelativeLayoutVersion;
+        layout.Save(LayoutFilePath);
+
+        MRPlacedCabinet marker = root.GetComponent<MRPlacedCabinet>();
+        if (marker == null)
+            marker = root.AddComponent<MRPlacedCabinet>();
+        marker.Initialize(placement.Id, cabinetDBName);
+
+        spawnedById[placement.Id] = root;
+        ConfigManager.WriteConsole($"{LogPrefix} added {cabinetDBName} ({placement.Id}) after placement ray");
+        return true;
+    }
+
+    public void DestroyTransientCabinet(GameObject root)
+    {
+        if (root == null)
+            return;
+
+        StopLibretroOnCabinet(root);
+
+        CabinetReplace replace = root.GetComponent<CabinetReplace>();
+        if (replace != null)
+            Destroy(replace.gameObject);
+        else
+            Destroy(root);
+
+        ConfigManager.WriteConsole($"{LogPrefix} destroyed transient cabinet {root.name}");
+    }
+
     public bool TryUpdatePlacementPose(
         string placementId,
         Transform mrSpaceOrigin,
         Vector3 worldPosition,
-        Quaternion worldRotation)
+        Quaternion worldRotation,
+        Guid anchorUuid = default)
     {
         EnsureLayoutLoaded();
         if (layout == null || string.IsNullOrEmpty(placementId) || mrSpaceOrigin == null)
@@ -241,8 +344,8 @@ public class MRLayoutRegistry : MonoBehaviour
         if (placement == null)
             return false;
 
-        placement.Position = MRVector3.From(mrSpaceOrigin.InverseTransformPoint(worldPosition));
-        placement.Rotation = MRQuaternion.From(Quaternion.Inverse(mrSpaceOrigin.rotation) * worldRotation);
+        WriteStoredPose(placement, placement.SurfaceType, worldPosition, worldRotation, anchorUuid);
+        layout.Version = AnchorRelativeLayoutVersion;
         layout.Save(LayoutFilePath);
 
         if (TryGetSpawnedRoot(placementId, out GameObject root))
@@ -271,27 +374,60 @@ public class MRLayoutRegistry : MonoBehaviour
             return false;
         }
 
+        ReadWorldPose(placement, out Vector3 worldPos, out Quaternion worldRot);
+
+        if (!TrySpawnCabinetAtWorldPose(
+                placement.CabinetDBName,
+                mrSpaceOrigin,
+                worldPos,
+                worldRot,
+                index,
+                registerSpawned: true,
+                out GameObject root))
+            return false;
+
+        float scale = placement.Scale > 0f ? placement.Scale : 1f;
+        root.transform.localScale = Vector3.one * scale;
+
+        MRPlacedCabinet marker = root.GetComponent<MRPlacedCabinet>();
+        if (marker == null)
+            marker = root.AddComponent<MRPlacedCabinet>();
+        marker.Initialize(placement.Id, placement.CabinetDBName);
+
+        spawnedById[placement.Id] = root;
+        ConfigManager.WriteConsole($"{LogPrefix} spawned {placement.DisplayLabel} at {worldPos}");
+        return true;
+    }
+
+    bool TrySpawnCabinetAtWorldPose(
+        string cabinetDBName,
+        Transform mrSpaceOrigin,
+        Vector3 worldPos,
+        Quaternion worldRot,
+        int index,
+        bool registerSpawned,
+        out GameObject spawnedRoot)
+    {
+        spawnedRoot = null;
+        if (string.IsNullOrEmpty(cabinetDBName) || mrSpaceOrigin == null)
+            return false;
+
         CabinetInformation cabInfo;
         try
         {
-            cabInfo = CabinetInformation.fromYaml(Path.Combine(ConfigManager.CabinetsDB, placement.CabinetDBName));
+            cabInfo = CabinetInformation.fromYaml(Path.Combine(ConfigManager.CabinetsDB, cabinetDBName));
         }
         catch (System.Exception e)
         {
-            ConfigManager.WriteConsoleException($"{LogPrefix} yaml load failed for {placement.CabinetDBName}", e);
+            ConfigManager.WriteConsoleException($"{LogPrefix} yaml load failed for {cabinetDBName}", e);
             return false;
         }
 
         if (cabInfo == null)
         {
-            ConfigManager.WriteConsoleError($"{LogPrefix} no description for {placement.CabinetDBName}");
+            ConfigManager.WriteConsoleError($"{LogPrefix} no description for {cabinetDBName}");
             return false;
         }
-
-        Vector3 localPos = placement.Position != null ? placement.Position.ToVector3() : Vector3.zero;
-        Quaternion localRot = placement.Rotation != null ? placement.Rotation.ToQuaternion() : Quaternion.identity;
-        Vector3 worldPos = mrSpaceOrigin.TransformPoint(localPos);
-        Quaternion worldRot = mrSpaceOrigin.rotation * localRot;
 
         Cabinet cabinet;
         try
@@ -308,24 +444,107 @@ public class MRLayoutRegistry : MonoBehaviour
         }
         catch (System.Exception e)
         {
-            ConfigManager.WriteConsoleException($"{LogPrefix} spawn failed {placement.CabinetDBName}", e);
+            ConfigManager.WriteConsoleException($"{LogPrefix} spawn failed {cabinetDBName}", e);
             return false;
         }
 
         if (cabinet == null)
             return false;
 
-        float scale = placement.Scale > 0f ? placement.Scale : 1f;
-        cabinet.gameObject.transform.localScale = Vector3.one * scale;
+        spawnedRoot = cabinet.gameObject;
+        DisableAutoFloorSnap(spawnedRoot);
 
-        var marker = cabinet.gameObject.GetComponent<MRPlacedCabinet>();
-        if (marker == null)
-            marker = cabinet.gameObject.AddComponent<MRPlacedCabinet>();
-        marker.Initialize(placement.Id, placement.CabinetDBName);
+        if (!registerSpawned)
+            ConfigManager.WriteConsole($"{LogPrefix} spawned transient {cabinetDBName} at {worldPos}");
 
-        spawnedById[placement.Id] = cabinet.gameObject;
-        ConfigManager.WriteConsole($"{LogPrefix} spawned {placement.DisplayLabel} at {worldPos}");
         return true;
+    }
+
+    static void WriteStoredPose(
+        MRCabinetPlacement placement,
+        PlacementSurfaceType surfaceType,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        Guid anchorUuid)
+    {
+        Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
+        if (MRAnchorPoseResolver.TryWriteAnchorRelativePose(
+                room,
+                surfaceType,
+                worldPosition,
+                worldRotation,
+                anchorUuid,
+                out string anchorUuidText,
+                out MRVector3 storedPosition,
+                out MRQuaternion storedRotation))
+        {
+            placement.AnchorUuid = anchorUuidText;
+            placement.Position = storedPosition;
+            placement.Rotation = storedRotation;
+            return;
+        }
+
+        placement.AnchorUuid = null;
+        placement.Position = MRVector3.From(worldPosition);
+        placement.Rotation = MRQuaternion.From(worldRotation);
+    }
+
+    static void ReadWorldPose(MRCabinetPlacement placement, out Vector3 worldPosition, out Quaternion worldRotation)
+    {
+        Vector3 storedPosition = placement.Position != null ? placement.Position.ToVector3() : Vector3.zero;
+        Quaternion storedRotation = placement.Rotation != null ? placement.Rotation.ToQuaternion() : Quaternion.identity;
+
+        Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
+        MRAnchorPoseResolver.TryResolveWorldPose(
+            room,
+            placement.AnchorUuid,
+            storedPosition,
+            storedRotation,
+            placement.SurfaceType,
+            out worldPosition,
+            out worldRotation);
+    }
+
+    void EnsureWorldSpaceLayout(Transform mrSpaceOrigin)
+    {
+        if (layout == null || layout.Version >= WorldSpaceLayoutVersion)
+            return;
+
+        ConfigManager.WriteConsoleWarning(
+            $"{LogPrefix} mr-layout version {layout.Version} uses legacy local coords — re-place cabinets once to fix saved poses");
+
+        if (mrSpaceOrigin != null)
+        {
+            foreach (MRCabinetPlacement placement in layout.GetCabinets())
+            {
+                if (placement?.Position == null || placement.Rotation == null)
+                    continue;
+
+                Vector3 localPos = placement.Position.ToVector3();
+                Quaternion localRot = placement.Rotation.ToQuaternion();
+                Vector3 worldPos = mrSpaceOrigin.TransformPoint(localPos);
+                Quaternion worldRot = mrSpaceOrigin.rotation * localRot;
+                placement.AnchorUuid = null;
+                placement.Position = MRVector3.From(worldPos);
+                placement.Rotation = MRQuaternion.From(worldRot);
+            }
+        }
+
+        layout.Version = WorldSpaceLayoutVersion;
+        layout.Save(LayoutFilePath);
+    }
+
+    static void DisableAutoFloorSnap(GameObject cabinetRoot)
+    {
+        if (cabinetRoot == null)
+            return;
+
+        PutOnFloor[] floorSnaps = cabinetRoot.GetComponentsInChildren<PutOnFloor>(true);
+        foreach (PutOnFloor floorSnap in floorSnaps)
+        {
+            if (floorSnap != null)
+                Destroy(floorSnap);
+        }
     }
 
     void DestroySpawnedInstance(string placementId)

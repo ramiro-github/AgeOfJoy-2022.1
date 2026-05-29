@@ -13,12 +13,15 @@ using UnityEngine.Events;
 public class MRConfigurationCabinetController : MonoBehaviour
 {
     const string LogPrefix = "[MRConfigurationCabinetController]";
-    const string DefaultCabinetResourcesPath = "ramiro/ConfigurationCabinetMiniMR";
+    const string DefaultCabinetResourcesPath = "ramiro/PrefabsEnvironment/ConfigurationCabinetMiniMR";
     const string LegacyWallUiResourcesPath = "MR/MRConfigurationUI";
     const string SavedPoseFlagKey = "MR.ConfigurationCabinetMiniMR.PoseSaved";
     const string SavedPosePositionKey = "MR.ConfigurationCabinetMiniMR.Position";
     const string SavedPoseRotationKey = "MR.ConfigurationCabinetMiniMR.Rotation";
-    const bool EnableSavedPoseLoad = false; // Temporary: ignore saved pose while testing placement flow.
+    const string SavedPoseAnchorUuidKey = "MR.ConfigurationCabinetMiniMR.AnchorUuid";
+    const int SavedPoseSchemaWorld = 2;
+    const int SavedPoseSchemaAnchorRelative = 3;
+    const bool EnableSavedPoseLoad = true;
     static readonly Vector3 CabinetFootprint = new Vector3(0.45f, 0.5f, 0.35f);
 
     public static MRConfigurationCabinetController Instance { get; private set; }
@@ -29,7 +32,7 @@ public class MRConfigurationCabinetController : MonoBehaviour
     [Tooltip("Wall-only fine adjust after auto-facing fix. Keep near zero.")]
     [Range(-30f, 30f)]
     [SerializeField] float wallMountYawOffsetDegrees = 0f;
-    [Tooltip("ConfigurationCabinetMiniMR: visible front is -X (player/camera on -X side of root).")]
+    [Tooltip("Fallback when prefab has no MRPlacementProfile.")]
     [SerializeField] PlacementFacingAxis wallFacingAxis = PlacementFacingAxis.NegativeX;
     [Tooltip("If true, always instantiate a new cabinet and ignore scene templates.")]
     [SerializeField] bool alwaysInstantiateCabinet = true;
@@ -55,6 +58,7 @@ public class MRConfigurationCabinetController : MonoBehaviour
     bool isEditOpen;
     bool cabinetWasInstantiated;
     bool initialPlacementRequested;
+    Coroutine initialPlacementRayCoroutine;
 
     public bool IsEditOpen => isEditOpen;
     public bool HasCabinet => cabinetInstance != null;
@@ -126,15 +130,22 @@ public class MRConfigurationCabinetController : MonoBehaviour
         if (mode != ExperienceMode.MR && mode != ExperienceMode.MR_EDIT)
             return;
 
+        if (placementRay != null && placementRay.IsActive)
+            return;
+
+        if (initialPlacementRequested)
+            return;
+
+        if (HasValidSavedPose())
+            return;
+
         ApplyPoseToCabinet(cabinetInstance);
     }
 #endif
 
     void HandleModeChanged(ExperienceMode mode)
     {
-        if (mode == ExperienceMode.MR)
-            SpawnAtMrOrigin();
-        else if (mode == ExperienceMode.VR)
+        if (mode == ExperienceMode.VR)
             Despawn();
     }
 
@@ -216,8 +227,8 @@ public class MRConfigurationCabinetController : MonoBehaviour
     {
         if (cabinetInstance != null)
         {
-            ApplyPoseToCabinet(cabinetInstance);
-            TryBeginInitialPlacementRay();
+            ApplyPoseToExistingCabinet();
+            RequestInitialPlacementRayWhenReady();
             return;
         }
 
@@ -255,6 +266,12 @@ public class MRConfigurationCabinetController : MonoBehaviour
     public void Despawn()
     {
         ForceCloseEdit();
+        CancelActivePlacementRay();
+        if (initialPlacementRayCoroutine != null)
+        {
+            StopCoroutine(initialPlacementRayCoroutine);
+            initialPlacementRayCoroutine = null;
+        }
         UnbindCoinInsert();
         if (cabinetWasInstantiated && cabinetInstance != null)
             Destroy(cabinetInstance);
@@ -262,6 +279,36 @@ public class MRConfigurationCabinetController : MonoBehaviour
         crtController = null;
         cabinetWasInstantiated = false;
         initialPlacementRequested = false;
+        placementRay = null;
+    }
+
+    void ApplyPoseToExistingCabinet()
+    {
+        if (cabinetInstance == null)
+            return;
+
+        if (placementRay != null && placementRay.IsActive)
+            return;
+
+        if (HasValidSavedPose() && TryLoadSavedPose(out Vector3 savedPos, out Quaternion savedRot))
+        {
+            cabinetInstance.transform.SetPositionAndRotation(savedPos, savedRot);
+            ConfigManager.WriteConsole($"{LogPrefix} pose (saved) pos={savedPos} rot={savedRot.eulerAngles}");
+            return;
+        }
+
+        if (NeedsInitialPlacementRay())
+            return;
+
+        ApplyPoseToCabinet(cabinetInstance);
+    }
+
+    void CancelActivePlacementRay()
+    {
+        MRPlacementRayController activeRay = placementRay != null
+            ? placementRay
+            : FindObjectOfType<MRPlacementRayController>();
+        activeRay?.CancelActive();
     }
 
     GameObject ResolveCabinetPrefab()
@@ -279,6 +326,8 @@ public class MRConfigurationCabinetController : MonoBehaviour
         }
 
         configurationCabinetPrefab = Resources.Load<GameObject>(DefaultCabinetResourcesPath);
+        if (configurationCabinetPrefab == null)
+            configurationCabinetPrefab = Resources.Load<GameObject>("ramiro/ConfigurationCabinetMiniMR");
         if (configurationCabinetPrefab == null)
             configurationCabinetPrefab = Resources.Load<GameObject>("UICabinet/ConfigurationCabinetMini");
 
@@ -310,7 +359,86 @@ public class MRConfigurationCabinetController : MonoBehaviour
 #if UNITY_EDITOR
         TryAutoInsertCoinForEditor();
 #endif
-        TryBeginInitialPlacementRay();
+        RequestInitialPlacementRayWhenReady();
+    }
+
+    static bool NeedsInitialPlacementRay() =>
+        !EnableSavedPoseLoad || !HasValidSavedPose();
+
+    static bool HasValidSavedPose()
+    {
+        if (!EnableSavedPoseLoad || !TryLoadSavedPose(out _, out _))
+            return false;
+
+        int schema = PlayerPrefs.GetInt(SavedPoseFlagKey, 0);
+        if (schema != SavedPoseSchemaAnchorRelative)
+            return true;
+
+        string anchorUuid = PlayerPrefs.GetString(SavedPoseAnchorUuidKey, string.Empty);
+        return !string.IsNullOrEmpty(anchorUuid);
+    }
+
+    void RequestInitialPlacementRayWhenReady()
+    {
+        if (!NeedsInitialPlacementRay() || cabinetInstance == null)
+            return;
+
+        if (initialPlacementRayCoroutine != null)
+            StopCoroutine(initialPlacementRayCoroutine);
+
+        initialPlacementRayCoroutine = StartCoroutine(InitialPlacementRayWhenReadyCoroutine());
+    }
+
+    IEnumerator InitialPlacementRayWhenReadyCoroutine()
+    {
+        const int maxAttempts = 90;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            if (cabinetInstance == null)
+                yield break;
+
+            if (initialPlacementRequested || !NeedsInitialPlacementRay())
+                yield break;
+
+            if (placementRay != null && placementRay.IsActive)
+                yield break;
+
+            MixedRealityManager mgr = MixedRealityManager.Instance;
+            if (mgr == null)
+            {
+                yield return null;
+                continue;
+            }
+
+            ExperienceMode mode = mgr.CurrentMode;
+            if (mode != ExperienceMode.MR && mode != ExperienceMode.MR_EDIT)
+            {
+                yield return null;
+                continue;
+            }
+
+            MREnvironmentSurfaces surfaces = MREnvironmentSurfaces.Instance;
+            if (surfaces != null && !surfaces.IsReady)
+            {
+                Transform player = FindPlayerTransform();
+                yield return surfaces.ProbeWhenReady(player);
+                yield return null;
+                continue;
+            }
+
+            if (BeginRepositionWithRay(isInitialPlacement: true))
+            {
+                ConfigManager.WriteConsole($"{LogPrefix} initial placement ray started");
+                initialPlacementRayCoroutine = null;
+                yield break;
+            }
+
+            yield return null;
+        }
+
+        initialPlacementRayCoroutine = null;
+        ConfigManager.WriteConsoleWarning($"{LogPrefix} initial placement ray could not start");
     }
 
     static GameObject FindSceneCabinet()
@@ -374,7 +502,10 @@ public class MRConfigurationCabinetController : MonoBehaviour
         if (!HasCabinet)
             SpawnAtMrOrigin();
         else
+        {
             ApplyPoseToCabinet(cabinetInstance);
+            RequestInitialPlacementRayWhenReady();
+        }
     }
 
     void PrepareCabinetInstance(GameObject root)
@@ -485,10 +616,17 @@ public class MRConfigurationCabinetController : MonoBehaviour
         if (root == null)
             return;
 
-        if (EnableSavedPoseLoad && TryLoadSavedPose(out Vector3 savedPos, out Quaternion savedRot))
+        if (HasValidSavedPose() && TryLoadSavedPose(out Vector3 savedPos, out Quaternion savedRot))
         {
             root.transform.SetPositionAndRotation(savedPos, savedRot);
-            ConfigManager.WriteConsole($"{LogPrefix} floor pose (saved) pos={savedPos} rot={savedRot.eulerAngles}");
+            ConfigManager.WriteConsole($"{LogPrefix} pose (saved) pos={savedPos} rot={savedRot.eulerAngles}");
+            return;
+        }
+
+        if (NeedsInitialPlacementRay())
+        {
+            PlaceCabinetNearViewForInitialRay(root);
+            ConfigManager.WriteConsole($"{LogPrefix} awaiting initial placement ray");
             return;
         }
 
@@ -498,15 +636,11 @@ public class MRConfigurationCabinetController : MonoBehaviour
         Vector3 worldPos;
         Quaternion worldRot;
         string poseSource;
-#if UNITY_EDITOR
-        bool useWallMount = false;
-#else
-        bool useWallMount = true;
-#endif
+        bool useWallMount = GetPlacementSurfaceType() == PlacementSurfaceType.Wall;
 
         if (useWallMount && surfaces != null && player != null
             && surfaces.TryGetWallMountedFramePose(
-                player, spawnDistanceMeters, CabinetFootprint.z, out worldPos, out worldRot, wallFacingAxis))
+                player, spawnDistanceMeters, CabinetFootprint.z, out worldPos, out worldRot, GetPlacementFacingAxis()))
         {
             poseSource = "wall mount";
             worldRot *= Quaternion.Euler(0f, spawnYawOffsetDegrees + wallMountYawOffsetDegrees, 0f);
@@ -549,50 +683,77 @@ public class MRConfigurationCabinetController : MonoBehaviour
             $"{LogPrefix} floor pose ({poseSource}) pos={root.transform.position} rot={root.transform.eulerAngles}");
     }
 
-    public void BeginRepositionWithRay()
+    public bool BeginRepositionWithRay(bool isInitialPlacement = false)
     {
         if (cabinetInstance == null)
-            return;
+            return false;
 
         placementRay = EnsurePlacementRayController();
         if (placementRay == null || placementRay.IsActive)
-            return;
+        {
+            if (placementRay != null && placementRay.IsActive)
+                ConfigManager.WriteConsole($"{LogPrefix} placement ray busy — skipped");
+            return false;
+        }
 
         bool reopenEdit = isEditOpen;
         ForceCloseEdit();
 
         placementRay.BeginMove(
             cabinetInstance,
-            PlacementSurfaceType.Wall,
-            wallFacingAxis,
-            confirmCallback: (worldPos, worldRot) =>
+            GetPlacementSurfaceType(),
+            GetPlacementFacingAxis(),
+            confirmCallback: (worldPos, worldRot, anchorUuid) =>
             {
-                SavePose(worldPos, worldRot);
+                SavePose(worldPos, worldRot, anchorUuid);
                 initialPlacementRequested = true;
                 if (reopenEdit)
                     OpenEdit();
             },
             cancelCallback: () =>
             {
+                if (isInitialPlacement)
+                    initialPlacementRequested = false;
                 if (reopenEdit)
                     OpenEdit();
             });
+        return true;
     }
 
-    void TryBeginInitialPlacementRay()
+    static void PlaceCabinetNearViewForInitialRay(GameObject root)
     {
-        if (cabinetInstance == null || initialPlacementRequested || (EnableSavedPoseLoad && HasSavedPose()))
+        if (root == null)
             return;
 
-        if (MixedRealityManager.Instance == null)
+        Transform player = FindPlayerTransform();
+        Transform view = Camera.main != null ? Camera.main.transform : player;
+        if (view == null)
             return;
 
-        ExperienceMode mode = MixedRealityManager.Instance.CurrentMode;
-        if (mode != ExperienceMode.MR && mode != ExperienceMode.MR_EDIT)
-            return;
+        Vector3 forward = view.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.001f)
+            forward = Vector3.forward;
+        forward.Normalize();
 
-        initialPlacementRequested = true;
-        BeginRepositionWithRay();
+        Vector3 startPos = view.position + forward * 1.2f;
+        startPos.y = view.position.y;
+        root.transform.SetPositionAndRotation(startPos, Quaternion.LookRotation(forward, Vector3.up));
+    }
+
+    MRPlacementProfile ResolvePlacementProfile() =>
+        cabinetInstance != null ? MRPlacementProfile.Resolve(cabinetInstance) : null;
+
+    PlacementSurfaceType GetPlacementSurfaceType()
+    {
+        MRPlacementProfile profile = ResolvePlacementProfile();
+        return profile != null ? profile.surfaceType : PlacementSurfaceType.Wall;
+    }
+
+    PlacementFacingAxis GetPlacementFacingAxis()
+    {
+        MRPlacementProfile profile = ResolvePlacementProfile();
+        return profile != null ? profile.facingAxis : wallFacingAxis;
     }
 
     MRPlacementRayController EnsurePlacementRayController()
@@ -609,31 +770,88 @@ public class MRConfigurationCabinetController : MonoBehaviour
     {
         worldPosition = Vector3.zero;
         worldRotation = Quaternion.identity;
-        if (PlayerPrefs.GetInt(SavedPoseFlagKey, 0) != 1)
+        int schema = PlayerPrefs.GetInt(SavedPoseFlagKey, 0);
+        if (schema != SavedPoseSchemaWorld && schema != SavedPoseSchemaAnchorRelative && schema != 1)
             return false;
 
         string posJson = PlayerPrefs.GetString(SavedPosePositionKey, string.Empty);
         string rotJson = PlayerPrefs.GetString(SavedPoseRotationKey, string.Empty);
         if (string.IsNullOrEmpty(posJson) || string.IsNullOrEmpty(rotJson))
+        {
+            ClearSavedPose();
             return false;
+        }
 
         MRVector3 pos = JsonUtility.FromJson<MRVector3>(posJson);
         MRQuaternion rot = JsonUtility.FromJson<MRQuaternion>(rotJson);
         if (pos == null || rot == null)
+        {
+            ClearSavedPose();
             return false;
+        }
 
-        worldPosition = pos.ToVector3();
-        worldRotation = rot.ToQuaternion();
+        Vector3 storedPosition = pos.ToVector3();
+        Quaternion storedRotation = rot.ToQuaternion();
+
+        if (schema == SavedPoseSchemaAnchorRelative)
+        {
+            string anchorUuidText = PlayerPrefs.GetString(SavedPoseAnchorUuidKey, string.Empty);
+            Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
+            MRAnchorPoseResolver.TryResolveWorldPose(
+                room,
+                anchorUuidText,
+                storedPosition,
+                storedRotation,
+                PlacementSurfaceType.Wall,
+                out worldPosition,
+                out worldRotation);
+            return true;
+        }
+
+        worldPosition = storedPosition;
+        worldRotation = storedRotation;
         return true;
     }
 
-    static bool HasSavedPose() => PlayerPrefs.GetInt(SavedPoseFlagKey, 0) == 1;
-
-    static void SavePose(Vector3 worldPosition, Quaternion worldRotation)
+    static void ClearSavedPose()
     {
-        PlayerPrefs.SetString(SavedPosePositionKey, JsonUtility.ToJson(MRVector3.From(worldPosition)));
-        PlayerPrefs.SetString(SavedPoseRotationKey, JsonUtility.ToJson(MRQuaternion.From(worldRotation)));
-        PlayerPrefs.SetInt(SavedPoseFlagKey, 1);
+        PlayerPrefs.DeleteKey(SavedPoseFlagKey);
+        PlayerPrefs.DeleteKey(SavedPosePositionKey);
+        PlayerPrefs.DeleteKey(SavedPoseRotationKey);
+        PlayerPrefs.DeleteKey(SavedPoseAnchorUuidKey);
+        PlayerPrefs.Save();
+    }
+
+    static bool HasSavedPose() => TryLoadSavedPose(out _, out _);
+
+    static void SavePose(Vector3 worldPosition, Quaternion worldRotation, System.Guid anchorUuid = default)
+    {
+        PlacementSurfaceType surfaceType = PlacementSurfaceType.Wall;
+        Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
+
+        if (MRAnchorPoseResolver.TryWriteAnchorRelativePose(
+                room,
+                surfaceType,
+                worldPosition,
+                worldRotation,
+                anchorUuid,
+                out string anchorUuidText,
+                out MRVector3 storedPosition,
+                out MRQuaternion storedRotation))
+        {
+            PlayerPrefs.SetString(SavedPosePositionKey, JsonUtility.ToJson(storedPosition));
+            PlayerPrefs.SetString(SavedPoseRotationKey, JsonUtility.ToJson(storedRotation));
+            PlayerPrefs.SetString(SavedPoseAnchorUuidKey, anchorUuidText);
+            PlayerPrefs.SetInt(SavedPoseFlagKey, SavedPoseSchemaAnchorRelative);
+        }
+        else
+        {
+            PlayerPrefs.SetString(SavedPosePositionKey, JsonUtility.ToJson(MRVector3.From(worldPosition)));
+            PlayerPrefs.SetString(SavedPoseRotationKey, JsonUtility.ToJson(MRQuaternion.From(worldRotation)));
+            PlayerPrefs.DeleteKey(SavedPoseAnchorUuidKey);
+            PlayerPrefs.SetInt(SavedPoseFlagKey, SavedPoseSchemaWorld);
+        }
+
         PlayerPrefs.Save();
     }
 

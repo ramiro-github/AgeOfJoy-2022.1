@@ -52,6 +52,8 @@ public class MRCabinetPlacement
     public MRVector3 Position;
     public MRQuaternion Rotation;
     public float Scale = 1f;
+    /// <summary>OVRAnchor UUID when Position/Rotation are local to that MRUK anchor (layout v3+).</summary>
+    public string AnchorUuid;
     public PlacementSurfaceType SurfaceType = PlacementSurfaceType.Floor;
     /// <summary>Local axis that points toward the viewer when placed (NegativeZ = Unity default mesh with Z as back).</summary>
     public PlacementFacingAxis FacingAxis = PlacementFacingAxis.PositiveZ;
@@ -63,7 +65,7 @@ public class MRCabinetPlacement
 [Serializable]
 public class MRLayout
 {
-    public int Version = 1;
+    public int Version = 3;
     public List<MRCabinetPlacement> Cabinets = new();
 
     readonly object cabinetsLock = new object();

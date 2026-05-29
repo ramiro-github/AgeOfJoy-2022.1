@@ -52,7 +52,10 @@ public class MRConfigurationController : MonoBehaviour
     float navCooldown;
     bool sessionActive;
     bool placementMoveActive;
+    bool placementAddActive;
     string movingPlacementId;
+    string pendingAddCabinetName;
+    GameObject pendingAddRoot;
 
     public bool IsSessionActive => sessionActive;
 
@@ -115,7 +118,9 @@ public class MRConfigurationController : MonoBehaviour
     {
         sessionActive = false;
         placementMoveActive = false;
+        placementAddActive = false;
         movingPlacementId = null;
+        CancelPendingAdd(destroyCabinet: true);
         currentScreen = Screen.Idle;
         cleanActionMap();
         ActivateShader(false);
@@ -128,7 +133,7 @@ public class MRConfigurationController : MonoBehaviour
         if (!sessionActive || screen == null)
             return;
 
-        if (placementMoveActive)
+        if (placementMoveActive || placementAddActive)
             return;
 
         navCooldown -= Time.deltaTime;
@@ -255,6 +260,18 @@ public class MRConfigurationController : MonoBehaviour
         DrawFooter("A: Add/Rem   B: back");
     }
 
+    void DrawPlacementRayHint(bool stickRotationEnabled)
+    {
+        screen.Clear();
+        screen.PrintCentered(0, "PLACE OBJECT", true);
+        screen.PrintCentered(4, "Point at floor", false);
+        screen.PrintCentered(6, "Trigger: confirm", false);
+        if (stickRotationEnabled)
+            screen.PrintCentered(8, "L stick L/R: rotate", false);
+        screen.PrintCentered(stickRotationEnabled ? 10 : 8, "B / Grip: cancel", false);
+        screen.DrawScreen();
+    }
+
     void DrawAddedPage()
     {
         screen.PrintCentered(0, "ADDED CABINETS", true);
@@ -286,18 +303,21 @@ public class MRConfigurationController : MonoBehaviour
             row++;
         }
 
-        DrawFooter("B: back");
+        DrawFooter("A: move   B: back");
     }
 
     void DrawHelpPage()
     {
         screen.PrintCentered(0, "HELP", true);
         screen.Print(2, 3, "Up/Down: navigate lists", false);
-        screen.Print(2, 5, "A: select / Add or Remove", false);
+        screen.Print(2, 5, "A: Add/Remove/Move", false);
         screen.Print(2, 7, "B: back / close panel", false);
-        screen.Print(2, 10, "Catalog = cabinetsdb/", false);
-        screen.Print(2, 11, "In Scene = mr-layout.yaml", false);
-        DrawFooter("A: move   B: back");
+        screen.Print(2, 9, "Add/Move: floor ray", false);
+        screen.Print(2, 10, "L stick L/R: rotate Y*", false);
+        screen.Print(2, 11, "* floor cabinets / prefab", false);
+        screen.Print(2, 13, "Catalog = cabinetsdb/", false);
+        screen.Print(2, 14, "In Scene = mr-layout.yaml", false);
+        DrawFooter("B: back");
     }
 
     void ShowIdle()
@@ -440,10 +460,80 @@ public class MRConfigurationController : MonoBehaviour
         }
         else
         {
-            ComputeSpawnPose(out Vector3 worldPos, out Quaternion worldRot);
-            if (registry.TryAddCabinetToScene(cabinetName, mrSpaceOrigin, worldPos, worldRot))
-                ConfigManager.WriteConsole($"{LogPrefix} added {cabinetName}");
+            BeginAddCabinetWithRay(cabinetName);
         }
+    }
+
+    void BeginAddCabinetWithRay(string cabinetName)
+    {
+        if (registry == null || placementRay == null || placementMoveActive || placementAddActive)
+            return;
+
+        if (placementRay.IsActive)
+            return;
+
+        ComputeInitialFloorPose(out Vector3 worldPos, out Quaternion worldRot);
+
+        if (!registry.TrySpawnTransientCabinet(cabinetName, mrSpaceOrigin, worldPos, worldRot, out GameObject root))
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} add ray spawn failed for {cabinetName}");
+            return;
+        }
+
+        placementAddActive = true;
+        pendingAddCabinetName = cabinetName;
+        pendingAddRoot = root;
+
+        MRPlacementProfile profile = MRPlacementProfile.Resolve(root);
+        PlacementSurfaceType surfaceType = profile != null
+            ? profile.surfaceType
+            : PlacementSurfaceType.Floor;
+        PlacementFacingAxis facingAxis = profile != null
+            ? profile.facingAxis
+            : PlacementFacingAxis.PositiveZ;
+
+        DrawPlacementRayHint(MRPlacementRayController.ExpectsStickRotationHint(profile, surfaceType));
+
+        placementRay.BeginMove(
+            root,
+            surfaceType,
+            facingAxis,
+            confirmCallback: (finalPos, finalRot, anchorUuid) =>
+            {
+                placementAddActive = false;
+                string name = pendingAddCabinetName;
+                GameObject spawned = pendingAddRoot;
+                pendingAddCabinetName = null;
+                pendingAddRoot = null;
+
+                if (spawned != null)
+                    spawned.transform.SetPositionAndRotation(finalPos, finalRot);
+
+                bool saved = registry.TryFinalizeTransientCabinetAdd(
+                    name, spawned, mrSpaceOrigin, finalPos, finalRot, anchorUuid);
+
+                if (!saved)
+                    ConfigManager.WriteConsoleWarning($"{LogPrefix} add confirm but save failed ({name})");
+
+                DrawCurrentScreen();
+            },
+            cancelCallback: () =>
+            {
+                CancelPendingAdd(destroyCabinet: true);
+                DrawCurrentScreen();
+            });
+
+        ConfigManager.WriteConsole($"{LogPrefix} add ray begin {cabinetName}");
+    }
+
+    void CancelPendingAdd(bool destroyCabinet)
+    {
+        placementAddActive = false;
+        if (destroyCabinet && registry != null && pendingAddRoot != null)
+            registry.DestroyTransientCabinet(pendingAddRoot);
+
+        pendingAddCabinetName = null;
+        pendingAddRoot = null;
     }
 
     void BeginMoveSelectedPlacement()
@@ -467,14 +557,18 @@ public class MRConfigurationController : MonoBehaviour
         placementMoveActive = true;
         movingPlacementId = placement.Id;
 
+        MRPlacementProfile profile = MRPlacementProfile.Resolve(spawnedRoot);
+        DrawPlacementRayHint(MRPlacementRayController.ExpectsStickRotationHint(profile, placement.SurfaceType));
+
         placementRay.BeginMove(
             spawnedRoot,
             placement.SurfaceType,
             placement.FacingAxis,
-            confirmCallback: (worldPos, worldRot) =>
+            confirmCallback: (worldPos, worldRot, anchorUuid) =>
             {
                 placementMoveActive = false;
-                bool saved = registry.TryUpdatePlacementPose(movingPlacementId, mrSpaceOrigin, worldPos, worldRot);
+                bool saved = registry.TryUpdatePlacementPose(
+                    movingPlacementId, mrSpaceOrigin, worldPos, worldRot, anchorUuid);
                 if (!saved)
                     ConfigManager.WriteConsoleWarning($"{LogPrefix} move confirm but save failed ({movingPlacementId})");
                 movingPlacementId = null;
@@ -508,6 +602,15 @@ public class MRConfigurationController : MonoBehaviour
         else if (selectedListIndex >= listScrollOffset + VisibleCabinetRows)
             listScrollOffset = selectedListIndex - VisibleCabinetRows + 1;
         listScrollOffset = Mathf.Clamp(listScrollOffset, 0, maxOffset);
+    }
+
+    void ComputeInitialFloorPose(out Vector3 worldPos, out Quaternion worldRot)
+    {
+        ComputeSpawnPose(out worldPos, out worldRot);
+
+        MREnvironmentSurfaces surfaces = MREnvironmentSurfaces.Instance;
+        if (surfaces != null && surfaces.TryGetFloorPointAt(worldPos, out Vector3 floorPoint))
+            worldPos = floorPoint;
     }
 
     void ComputeSpawnPose(out Vector3 worldPos, out Quaternion worldRot)

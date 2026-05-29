@@ -16,8 +16,40 @@ public enum PlacementFacingAxis
     NegativeX = 3
 }
 
+/// <summary>
+/// World axis used when the player rotates an object with the left stick during placement ray.
+/// </summary>
+public enum PlacementStickRotationAxis
+{
+    /// <summary>World Y (vertical). Spin on the floor like a turntable. Quest: left stick ← →.</summary>
+    WorldYaw = 0,
+    /// <summary>World X. Tilt forward/back around horizontal X.</summary>
+    WorldPitch = 1,
+    /// <summary>World Z. Roll around forward Z.</summary>
+    WorldRoll = 2
+}
+
 public static class PlacementOrientation
 {
+    public static Vector3 WorldAxis(PlacementStickRotationAxis axis) =>
+        axis switch
+        {
+            PlacementStickRotationAxis.WorldPitch => Vector3.right,
+            PlacementStickRotationAxis.WorldRoll => Vector3.forward,
+            _ => Vector3.up
+        };
+
+    /// <summary>Apply stick rotation offset (degrees) around the chosen world axis.</summary>
+    public static Quaternion ApplyStickRotationOffset(
+        Quaternion baseRotation,
+        PlacementStickRotationAxis axis,
+        float degrees)
+    {
+        if (Mathf.Approximately(degrees, 0f))
+            return baseRotation;
+        return Quaternion.AngleAxis(degrees, WorldAxis(axis)) * baseRotation;
+    }
+
     public static Vector3 LocalForward(PlacementFacingAxis axis) =>
         axis switch
         {
