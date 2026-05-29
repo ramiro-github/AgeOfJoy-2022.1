@@ -424,7 +424,8 @@ public class MRLayoutRegistry : MonoBehaviour
                 worldRot,
                 index,
                 registerSpawned: true,
-                out GameObject root))
+                out GameObject root,
+                placement.FacingAxis))
             return false;
 
         root.transform.localScale = Vector3.one * GetEffectiveCabinetScale(placement);
@@ -446,7 +447,8 @@ public class MRLayoutRegistry : MonoBehaviour
         Quaternion worldRot,
         int index,
         bool registerSpawned,
-        out GameObject spawnedRoot)
+        out GameObject spawnedRoot,
+        PlacementFacingAxis facingAxis = PlacementFacingAxis.PositiveZ)
     {
         spawnedRoot = null;
         if (string.IsNullOrEmpty(cabinetDBName) || mrSpaceOrigin == null)
@@ -498,6 +500,8 @@ public class MRLayoutRegistry : MonoBehaviour
         spawnedRoot = cabinet.gameObject;
         DisableAutoFloorSnap(spawnedRoot);
         spawnedRoot.transform.localScale = Vector3.one * MRAdjustmentsSettings.CabinetScale;
+        MRGameCabinetAttractSetup.AttachAttractZone(
+            spawnedRoot, cabinet, cabInfo, cabinetDBName, index, facingAxis);
 
         if (!registerSpawned)
             ConfigManager.WriteConsole($"{LogPrefix} spawned transient {cabinetDBName} at {worldPos}");

@@ -52,10 +52,15 @@ public class AgentScenePosition : MonoBehaviour
 
     private bool colliderIsPlayer(Collider collision)
     {
-        return collision.gameObject.name == "OVRPlayerControllerGalery"
-        /* ||
-                collision.gameObject.name == "GrabVolumeSmall" ||
-                collision.gameObject.name == "GrabVolumeBig"*/;
+        Transform node = collision.transform;
+        while (node != null)
+        {
+            if (node.CompareTag("Player") || node.name == "OVRPlayerControllerGalery")
+                return true;
+            node = node.parent;
+        }
+
+        return false;
     }
 
     private void OnTriggerEnter(Collider collision)
