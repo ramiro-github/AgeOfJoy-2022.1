@@ -217,6 +217,25 @@ public class MRConfigurationCabinetController : MonoBehaviour
         ConfigManager.WriteConsole($"{LogPrefix} CRT configuration closed");
     }
 
+    /// <summary>Idle CRT and empty coin slot before game-cabinet placement ray (Add / Move in ADDED).</summary>
+    public void SuspendEditForGameCabinetPlacement()
+    {
+        if (crtController != null && crtController.IsSessionActive)
+            crtController.SuspendForExternalPlacement();
+
+        if (boundCoinSlot != null)
+            boundCoinSlot.clean();
+
+        isEditOpen = false;
+
+        if (MixedRealityManager.Instance != null
+            && MixedRealityManager.Instance.CurrentMode == ExperienceMode.MR_EDIT)
+            MixedRealityManager.Instance.ExitMREdit();
+
+        ConfigManager.WriteConsole(
+            $"{LogPrefix} suspended for cabinet placement — insert coin to reopen CRT");
+    }
+
     public void ForceCloseEdit()
     {
         crtController?.EndSession();

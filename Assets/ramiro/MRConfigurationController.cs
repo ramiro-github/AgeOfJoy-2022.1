@@ -51,6 +51,7 @@ public class MRConfigurationController : MonoBehaviour
     int listScrollOffset;
     float navCooldown;
     bool sessionActive;
+    bool confirmControlWasActive;
     bool placementMoveActive;
     bool placementAddActive;
     string movingPlacementId;
@@ -104,6 +105,7 @@ public class MRConfigurationController : MonoBehaviour
 
         setupActionMap();
         sessionActive = true;
+        confirmControlWasActive = false;
         coinSlot?.insertCoin();
 
         currentScreen = Screen.NavMain;
@@ -117,6 +119,7 @@ public class MRConfigurationController : MonoBehaviour
     public void EndSession()
     {
         sessionActive = false;
+        confirmControlWasActive = false;
         placementMoveActive = false;
         placementAddActive = false;
         movingPlacementId = null;
@@ -126,6 +129,19 @@ public class MRConfigurationController : MonoBehaviour
         ActivateShader(false);
         ShowIdle();
         ConfigManager.WriteConsole($"{LogPrefix} session ended");
+    }
+
+    /// <summary>CRT off + coin cleared while a game-cabinet placement ray runs; session reopens on next coin insert.</summary>
+    public void SuspendForExternalPlacement()
+    {
+        sessionActive = false;
+        confirmControlWasActive = false;
+        placementMoveActive = false;
+        movingPlacementId = null;
+        cleanActionMap();
+        ActivateShader(false);
+        ShowIdle();
+        ConfigManager.WriteConsole($"{LogPrefix} session suspended for cabinet placement");
     }
 
     void Update()
@@ -162,7 +178,12 @@ public class MRConfigurationController : MonoBehaviour
         }
 
         if (WasConfirmPressed())
-            HandleConfirm();
+        {
+            if (navCooldown > 0f)
+                SyncConfirmControlEdgeState();
+            else
+                HandleConfirm();
+        }
     }
 
     void BuildNavMenu()
@@ -425,7 +446,18 @@ public class MRConfigurationController : MonoBehaviour
                 return;
         }
 
+        navCooldown = navRepeatDelay;
+        SyncConfirmControlEdgeState();
         DrawCurrentScreen();
+    }
+
+    void SyncConfirmControlEdgeState()
+    {
+        confirmControlWasActive = ControlActive(LC.JOYPAD_A);
+#if !UNITY_EDITOR
+        if (OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RTouch))
+            confirmControlWasActive = true;
+#endif
     }
 
     void HandleBack()
@@ -437,6 +469,8 @@ public class MRConfigurationController : MonoBehaviour
             case Screen.Help:
                 currentScreen = Screen.NavMain;
                 navMenu.selectedIndex = 0;
+                navCooldown = navRepeatDelay;
+                SyncConfirmControlEdgeState();
                 DrawCurrentScreen();
                 break;
             case Screen.NavMain:
@@ -471,6 +505,8 @@ public class MRConfigurationController : MonoBehaviour
 
         if (placementRay.IsActive)
             return;
+
+        MRConfigurationCabinetController.Instance?.SuspendEditForGameCabinetPlacement();
 
         ComputeInitialFloorPose(out Vector3 worldPos, out Quaternion worldRot);
 
@@ -553,6 +589,8 @@ public class MRConfigurationController : MonoBehaviour
             ConfigManager.WriteConsoleWarning($"{LogPrefix} move skipped, spawned root missing for {placement.Id}");
             return;
         }
+
+        MRConfigurationCabinetController.Instance?.SuspendEditForGameCabinetPlacement();
 
         placementMoveActive = true;
         movingPlacementId = placement.Id;
@@ -771,13 +809,18 @@ public class MRConfigurationController : MonoBehaviour
 
     bool WasConfirmPressed()
     {
-        if (ControlActive(LC.JOYPAD_A))
-            return true;
+        bool active = ControlActive(LC.JOYPAD_A);
 #if UNITY_EDITOR
-        return Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.JoystickButton0);
+        if (Input.GetKey(KeyCode.Return) || Input.GetKey(KeyCode.JoystickButton0))
+            active = true;
 #else
-        return OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch);
+        if (OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RTouch))
+            active = true;
 #endif
+
+        bool pressed = active && !confirmControlWasActive;
+        confirmControlWasActive = active;
+        return pressed;
     }
 
     bool WasBackPressed()
