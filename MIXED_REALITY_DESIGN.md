@@ -8,7 +8,7 @@
 | **Versão de referência** | [0.5.0](https://github.com/curif/AgeOfJoy-2022.1/tree/0.5.0) |
 | **Licença** | GPL-3.0 |
 | **Status** | Implementação em progresso na branch 0.5.0 (MVP parcial já funcional) |
-| **Documento** | v1.0 — Maio de 2026 |
+| **Documento** | v1.1 — Maio de 2026 |
 
 ---
 
@@ -30,17 +30,20 @@ Simulador de fliperama em VR para Meta Quest, feito em Unity (C#), com máquinas
 
 | Componente | Versão / uso |
 |------------|----------------|
-| `com.unity.xr.oculus` | 4.0.0 |
-| `com.unity.xr.interaction.toolkit` | 2.3.2 |
-| Player | `OVRPlayerControllerGalery`, `XROrigin` |
-| Mãos | `ChangeControls`, `ActionBasedController` |
+| `com.meta.xr.sdk.all` | 72.0.0 |
+| `com.unity.xr.oculus` | 4.1.2 |
+| `com.unity.xr.interaction.toolkit` | 2.5.2 |
+| Player | `PlayerController`, `XROrigin`, `ChangeControls` |
+| Mãos | `ChangeControls`, `ActionBasedController`, OVR input |
 
 ### 2.3 Estado atual em relação ao MR
 
-- Já existe implementação MR funcional em `Assets/ramiro/` (passthrough, modos, layout e menu CRT).
-- Fluxo principal de edição usa `ConfigurationCabinetMiniMR` com estética VR (CRT + ficha), sem depender de uGUI wall-mounted.
-- `mr-layout.yaml` é usado para persistência Add/Remove no modo MR.
-- Occlusão avançada e anchor persistente ainda permanecem como fases futuras.
+- Implementação MR funcional em **`Assets/ramiro/`** (passthrough, modos, layout, menu CRT, placement ray).
+- Fluxo principal de edição: **`ConfigurationCabinetMiniMR`** com CRT + ficha (`MRConfigurationController`).
+- `mr-layout.yaml` persiste cabinets de jogo (Add/Remove/Move na lista ADDED).
+- Pose do config cabinet: **PlayerPrefs** (separado do yaml).
+- **Locomotion VR desligada em MR** — move, turn e teleport suspensos via `ChangeControls.SetMrLocomotionSuspended`.
+- Occlusão avançada e anchor persistente permanecem como fases futuras.
 
 ### 2.4 Princípio de contribuição (`Contributing.md`)
 
@@ -75,8 +78,8 @@ Permitir que o jogador:
 | Modo | Descrição |
 |------|-----------|
 | `VR` | Comportamento atual: salas virtuais, slots fixos, `registry.yaml` por `Room` + `Position` |
-| `MR` | Passthrough, sem (ou com mínima) geometria de fliperama; layout 6DOF em `mr-layout.yaml` |
-| `MR_EDIT` | Submodo MR: UI na mão + raio de posicionamento; edição do layout |
+| `MR` | Passthrough, sem (ou com mínima) geometria de fliperama; layout 6DOF em `mr-layout.yaml`; **sem locomotion** |
+| `MR_EDIT` | Submodo MR: UI CRT + raio de posicionamento; edição do layout |
 
 ---
 
@@ -155,7 +158,7 @@ flowchart TB
 | `MRLayoutRegistry` | CRUD de `mr-layout.yaml`; spawn/despawn de todos os cabinets MR |
 | `MRHandMenuController` | Painel World Space na mão; listas; navegação; delete |
 | `MRCabinetListProvider` | “No ambiente” vs “Catálogo” (`cabinetsdb`) |
-| `MRCabinetPlacementRay` | Raycast; preview fantasma; rotação; confirmar/cancelar |
+| `MRCabinetPlacementRay` | Raycast; preview fantasma; rotação; confirmar/cancelar *(implementado como `MRPlacementRayController` em `Assets/ramiro/`)* |
 | `MROcclusionController` | Depth / scene mesh; cabinets atrás de paredes reais |
 | `MRSpatialAnchor` (fase 4) | Persistência de origem do layout no Quest |
 
@@ -193,6 +196,8 @@ cabinets:
     position: { x: 1.2, y: 0, z: -0.8 }
     rotation: { x: 0, y: 0.707, z: 0, w: 0.707 }
     scale: 1.0
+    surfaceType: 0              # Floor=0, Wall=1 (PlacementSurfaceType)
+    facingAxis: 0               # PlacementFacingAxis (ex.: NegativeX=3 para ConfigurationCabinetMiniMR)
     addedAt: "2026-05-22T12:00:00Z"   # opcional
 ```
 
@@ -215,6 +220,8 @@ public class MRCabinetPlacement
     public Vector3Serializable Position;
     public QuaternionSerializable Rotation;
     public float Scale = 1f;
+    public PlacementSurfaceType SurfaceType = PlacementSurfaceType.Floor;
+    public PlacementFacingAxis FacingAxis = PlacementFacingAxis.PositiveZ;
 }
 
 [Serializable]
@@ -299,9 +306,22 @@ MR → VR:
   - Carregar galeria VR padrão
 ```
 
+### 9.4 Locomotion em MR
+
+Em MR o jogador permanece **fixo no espaço físico** — não há teleporte nem rotação por stick.
+
+| Comportamento | VR | MR |
+|---------------|----|----|
+| Stick move | ✅ | ❌ suspenso |
+| Turn (contínuo/snap) | ✅ | ❌ suspenso |
+| Teleporte (`BeamController`) | ✅ | ❌ suspenso |
+| Mãos visíveis | — | ✅ (`PlayerMode(false)`) |
+
+Implementação: `MRVrSystemsGate.SuspendForMR()` → `ChangeControls.SetMrLocomotionSuspended(true)`; restaurado em `ResumeForVR()`.
+
 ---
 
-## 10. Gerenciamento de cabinets (UI na mão + raio)
+## 10. Gerenciamento de cabinets (UI CRT + raio)
 
 ### 10.1 Visão geral
 
@@ -525,7 +545,7 @@ stateDiagram-v2
 | **1** | Passthrough + `ExperienceMode` + toggle imersivo | Alterna VR/MR sem crash; MR sem cabinets |
 | **2a** | `mr-layout.yaml` + spawn ao entrar MR | Cabinets aparecem nas poses salvas |
 | **2b** | UI na mão: listar + deletar | Remove do ambiente e persiste |
-| **2c** | Raio + preview + adicionar (+ mover) | Colocação completa na mão com regras por superfície (Wall/Floor) |
+| **2c** | Raio + preview + adicionar (+ mover) | ✅ parcial — ray Wall/Floor, move ADDED + config cabinet; add catálogo ainda spawn direto |
 | **3** | Occlusão por paredes reais | Cabinets atrás de paredes são tampados |
 | **4** | Spatial Anchor Meta | Layout estável entre sessões |
 | **5** | Polish: limites, performance, Quest 2 doc | Testes comunitários |
@@ -541,7 +561,7 @@ stateDiagram-v2
 | Memória Quest | OOM | Despawn VR em MR; limite de cabinets |
 | Drift de tracking | Layout “anda” | Spatial Anchor (fase 4) |
 | NPCs / NavMesh em MR | Comportamento estranho | Desligar NPCs em MR no MVP |
-| Teleporte por slot | Não aplicável | Locomoção livre + proximidade |
+| Teleporte por slot | Não aplicável | Locomotion **desligada** em MR; proximidade física |
 | Autenticidade | UI quebra imersão | `GenericMenu` / terminal retrô |
 | Quest 2 | MR fraco | Documentar “Quest 3+ recomendado” |
 | Scope creep | PR rejeitado | PRs pequenos por fase |
@@ -558,7 +578,7 @@ stateDiagram-v2
 | `Assets/curif/LibRetroWrapper/CabinetFactory.cs` | Factory com pose |
 | `Assets/curif/LibRetroWrapper/CabinetReplace.cs` | Spawn dinâmico de referência |
 | `Assets/curif/LibRetroWrapper/PutOnFloor.cs` | Raycast chão |
-| `Assets/curif/LibRetroWrapper/ChangeControls.cs` | Mãos/controllers |
+| `Assets/curif/LibRetroWrapper/ChangeControls.cs` | Mãos/controllers; **`SetMrLocomotionSuspended`** em MR |
 | `Assets/curif/LibRetroWrapper/PlayerController.cs` | XROrigin, tracking |
 | `Assets/curif/UI/ConfigurationController.cs` | Lista cabinets |
 | `Assets/curif/UI/GenericMenu.cs` | UI retrô |
@@ -567,7 +587,34 @@ stateDiagram-v2
 
 ---
 
-## 17. Arquivos novos sugeridos
+## 17. Arquivos implementados (`Assets/ramiro/`)
+
+```
+Assets/ramiro/
+  MixedRealityManager.cs
+  MixedRealityBootstrap.cs
+  MRLayoutRegistry.cs
+  MRPlacementRayController.cs
+  PlacementOrientation.cs
+  MRConfigurationCabinetController.cs
+  MRConfigurationController.cs
+  MREnvironmentSurfaces.cs
+  MRVrSystemsGate.cs
+  MRPassthroughController.cs
+  MRSceneBootstrap.cs
+  MRCameraRigShim.cs
+  MRMrEnvironmentLighting.cs
+  MRModeInput.cs
+  MREditMenuInput.cs
+  Data/
+    MRLayout.cs
+  Prefabs/ (via Resources)
+    Resources/ramiro/ConfigurationCabinetMiniMR.prefab
+```
+
+*(Design original previa `Assets/curif/MixedReality/` — código real está em `Assets/ramiro/`.)*
+
+## 17.1 Arquivos novos sugeridos (legado design doc)
 
 ```
 Assets/curif/MixedReality/
@@ -675,3 +722,4 @@ Must follow “Preserving the Simulation” in `Contributing.md` — retro/in-wo
 | Versão | Data | Notas |
 |--------|------|-------|
 | 1.0 | 2026-05-22 | Documento inicial — design MR comunitário |
+| 1.1 | 2026-05-28 | Estado implementado: `Assets/ramiro/`, placement ray, locomotion suspend, schema `surfaceType`/`facingAxis` |
