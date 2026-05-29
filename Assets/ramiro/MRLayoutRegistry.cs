@@ -41,6 +41,7 @@ public class MRLayoutRegistry : MonoBehaviour
         }
 
         Instance = this;
+        MRLibretroWarmup.EnsureOnMainThread();
     }
 
     void OnDestroy()
@@ -269,6 +270,28 @@ public class MRLayoutRegistry : MonoBehaviour
         return true;
     }
 
+    /// <summary>TestMRmanager / editor: spawn without mr-layout entry or duplicate check.</summary>
+    public bool TrySpawnValidationCabinet(
+        string cabinetDBName,
+        Transform mrSpaceOrigin,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        out GameObject spawnedRoot)
+    {
+        spawnedRoot = null;
+        if (string.IsNullOrEmpty(cabinetDBName) || mrSpaceOrigin == null)
+            return false;
+
+        return TrySpawnCabinetAtWorldPose(
+            cabinetDBName,
+            mrSpaceOrigin,
+            worldPosition,
+            worldRotation,
+            spawnedById.Count,
+            registerSpawned: false,
+            out spawnedRoot);
+    }
+
     /// <summary>Commit a transient cabinet after floor placement ray confirm.</summary>
     public bool TryFinalizeTransientCabinetAdd(
         string cabinetDBName,
@@ -429,6 +452,8 @@ public class MRLayoutRegistry : MonoBehaviour
             return false;
         }
 
+        MRLibretroWarmup.EnsureOnMainThread();
+
         Cabinet cabinet;
         try
         {
@@ -439,7 +464,7 @@ public class MRLayoutRegistry : MonoBehaviour
                 worldPos,
                 worldRot,
                 mrSpaceOrigin,
-                agentPlayerPositions: null,
+                agentPlayerPositions: new List<AgentScenePosition>(),
                 backgroundSoundController: null);
         }
         catch (System.Exception e)
@@ -451,6 +476,8 @@ public class MRLayoutRegistry : MonoBehaviour
         if (cabinet == null)
             return false;
 
+        ApplyCabinetSkinning(cabinet, cabInfo);
+
         spawnedRoot = cabinet.gameObject;
         DisableAutoFloorSnap(spawnedRoot);
 
@@ -458,6 +485,22 @@ public class MRLayoutRegistry : MonoBehaviour
             ConfigManager.WriteConsole($"{LogPrefix} spawned transient {cabinetDBName} at {worldPos}");
 
         return true;
+    }
+
+    static void ApplyCabinetSkinning(Cabinet cabinet, CabinetInformation cabInfo)
+    {
+        if (cabinet == null || cabInfo?.Parts == null || cabInfo.Parts.Count == 0)
+            return;
+
+        try
+        {
+            CabinetFactory.skinFromInformation(cabinet, cabInfo);
+            ConfigManager.WriteConsole($"{LogPrefix} skinned {cabInfo.name} ({cabInfo.Parts.Count} parts)");
+        }
+        catch (Exception e)
+        {
+            ConfigManager.WriteConsoleException($"{LogPrefix} skinning failed for {cabInfo.name}", e);
+        }
     }
 
     static void WriteStoredPose(

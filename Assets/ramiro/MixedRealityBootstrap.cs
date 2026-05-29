@@ -34,6 +34,9 @@ public static class MixedRealityBootstrap
         root.AddComponent<MRRoomInfoUI>();
         root.AddComponent<MREditorMrSimulator>();
 
+        if (active.name == "TestMRmanager")
+            root.AddComponent<MRTestGameCabinetSpawn>();
+
         Object.DontDestroyOnLoad(root);
         ConfigManager.WriteConsole("[MixedRealityBootstrap] MixedRealitySystem installed");
     }
