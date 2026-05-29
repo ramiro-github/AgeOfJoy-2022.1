@@ -22,6 +22,7 @@ public class MRConfigurationController : MonoBehaviour
         NavMain,
         Cabinets,
         Added,
+        Adjustments,
         Help
     }
 
@@ -48,6 +49,7 @@ public class MRConfigurationController : MonoBehaviour
 
     Screen currentScreen = Screen.Idle;
     int selectedListIndex;
+    int selectedAdjustmentIndex;
     int listScrollOffset;
     float navCooldown;
     bool sessionActive;
@@ -97,6 +99,7 @@ public class MRConfigurationController : MonoBehaviour
         registry = EnsureRegistry();
         mrSpaceOrigin = EnsureMrSpaceOrigin();
         placementRay = EnsurePlacementRayController();
+        MRAdjustmentsSettings.EnsureLoaded();
         registry.EnsureLayoutLoaded();
         registry.SpawnAll(mrSpaceOrigin);
 
@@ -137,7 +140,9 @@ public class MRConfigurationController : MonoBehaviour
         sessionActive = false;
         confirmControlWasActive = false;
         placementMoveActive = false;
+        placementAddActive = false;
         movingPlacementId = null;
+        currentScreen = Screen.Idle;
         cleanActionMap();
         ActivateShader(false);
         ShowIdle();
@@ -162,6 +167,17 @@ public class MRConfigurationController : MonoBehaviour
 
         if (navCooldown <= 0f)
         {
+            if (currentScreen == Screen.Adjustments)
+            {
+                int adjustDir = ReadHorizontalAdjustDirection();
+                if (adjustDir != 0)
+                {
+                    ApplyAdjustmentChange(adjustDir);
+                    navCooldown = navRepeatDelay;
+                    return;
+                }
+            }
+
             if (WasMoveUp() || ReadStickY() > 0.55f)
             {
                 MoveSelection(-1);
@@ -192,6 +208,7 @@ public class MRConfigurationController : MonoBehaviour
         navMenu.AddOption("CABINETS", "Catalog: add or remove in MR space");
         navMenu.AddOption("ADDED", "Cabinets in mr-layout.yaml");
         navMenu.AddOption("MOVE CONFIG", "Reposition ConfigurationCabinetMiniMR");
+        navMenu.AddOption("ADJUSTMENTS", "Scale and floor position for game cabinets");
         navMenu.AddOption("HELP", "Controls");
         navMenu.AddOption("EXIT", "Close panel");
     }
@@ -232,6 +249,9 @@ public class MRConfigurationController : MonoBehaviour
                 break;
             case Screen.Added:
                 DrawAddedPage();
+                break;
+            case Screen.Adjustments:
+                DrawAdjustmentsPage();
                 break;
             case Screen.Help:
                 DrawHelpPage();
@@ -281,18 +301,6 @@ public class MRConfigurationController : MonoBehaviour
         DrawFooter("A: Add/Rem   B: back");
     }
 
-    void DrawPlacementRayHint(bool stickRotationEnabled)
-    {
-        screen.Clear();
-        screen.PrintCentered(0, "PLACE OBJECT", true);
-        screen.PrintCentered(4, "Point at floor", false);
-        screen.PrintCentered(6, "Trigger: confirm", false);
-        if (stickRotationEnabled)
-            screen.PrintCentered(8, "L stick L/R: rotate", false);
-        screen.PrintCentered(stickRotationEnabled ? 10 : 8, "B / Grip: cancel", false);
-        screen.DrawScreen();
-    }
-
     void DrawAddedPage()
     {
         screen.PrintCentered(0, "ADDED CABINETS", true);
@@ -327,6 +335,24 @@ public class MRConfigurationController : MonoBehaviour
         DrawFooter("A: move   B: back");
     }
 
+    void DrawAdjustmentsPage()
+    {
+        screen.PrintCentered(0, "ADJUSTMENTS", true);
+        screen.PrintLine(1, false, '-');
+
+        float scale = MRAdjustmentsSettings.CabinetScale;
+        float floorPos = MRAdjustmentsSettings.FloorCabinetPosition;
+
+        string scaleLine = $"Scale Cabinets {scale:F2}";
+        string floorLine = $"Floor Cabinets Position {floorPos:F2}";
+
+        screen.Print(1, 4, selectedAdjustmentIndex == 0 ? "> " + scaleLine : "  " + scaleLine, selectedAdjustmentIndex == 0);
+        screen.Print(1, 6, selectedAdjustmentIndex == 1 ? "> " + floorLine : "  " + floorLine, selectedAdjustmentIndex == 1);
+
+        screen.Print(1, 10, "1.00 = default", false);
+        DrawFooter("R stick: select/adjust +/-0.01   B: back");
+    }
+
     void DrawHelpPage()
     {
         screen.PrintCentered(0, "HELP", true);
@@ -334,10 +360,12 @@ public class MRConfigurationController : MonoBehaviour
         screen.Print(2, 5, "A: Add/Remove/Move", false);
         screen.Print(2, 7, "B: back / close panel", false);
         screen.Print(2, 9, "Add/Move: floor ray", false);
-        screen.Print(2, 10, "L stick L/R: rotate Y*", false);
-        screen.Print(2, 11, "* floor cabinets / prefab", false);
-        screen.Print(2, 13, "Catalog = cabinetsdb/", false);
-        screen.Print(2, 14, "In Scene = mr-layout.yaml", false);
+        screen.Print(2, 10, "Adjustments: scale/floor", false);
+        screen.Print(2, 11, "R stick L/R: adjust +/-0.01", false);
+        screen.Print(2, 12, "R stick L/R: rotate Y*", false);
+        screen.Print(2, 13, "* floor cabinets / prefab", false);
+        screen.Print(2, 15, "Catalog = cabinetsdb/", false);
+        screen.Print(2, 16, "In Scene = mr-layout.yaml", false);
         DrawFooter("B: back");
     }
 
@@ -395,7 +423,40 @@ public class MRConfigurationController : MonoBehaviour
                 ClampListScroll();
                 DrawCurrentScreen();
                 break;
+
+            case Screen.Adjustments:
+                selectedAdjustmentIndex += delta;
+                if (selectedAdjustmentIndex < 0)
+                    selectedAdjustmentIndex = 1;
+                else if (selectedAdjustmentIndex > 1)
+                    selectedAdjustmentIndex = 0;
+                DrawCurrentScreen();
+                break;
         }
+    }
+
+    void ApplyAdjustmentChange(int direction)
+    {
+        if (registry == null)
+            return;
+
+        if (selectedAdjustmentIndex == 0)
+            MRAdjustmentsSettings.AdjustCabinetScale(direction);
+        else
+            MRAdjustmentsSettings.AdjustFloorCabinetPosition(direction);
+
+        registry.ApplyGlobalAdjustmentsToSpawnedFloorCabinets();
+        DrawCurrentScreen();
+    }
+
+    int ReadHorizontalAdjustDirection()
+    {
+        float stickX = ReadStickX();
+        if (stickX > 0.55f || WasMoveRight())
+            return 1;
+        if (stickX < -0.55f || WasMoveLeft())
+            return -1;
+        return 0;
     }
 
     void HandleConfirm()
@@ -409,9 +470,11 @@ public class MRConfigurationController : MonoBehaviour
                 break;
 
             case Screen.Cabinets:
-                ExecuteCabinetToggle(selectedListIndex);
-                RefreshCatalog();
-                DrawCurrentScreen();
+                if (ExecuteCabinetToggle(selectedListIndex))
+                {
+                    RefreshCatalog();
+                    DrawCurrentScreen();
+                }
                 break;
             case Screen.Added:
                 BeginMoveSelectedPlacement();
@@ -432,6 +495,10 @@ public class MRConfigurationController : MonoBehaviour
                 selectedListIndex = 0;
                 listScrollOffset = 0;
                 currentScreen = Screen.Added;
+                break;
+            case "ADJUSTMENTS":
+                selectedAdjustmentIndex = 0;
+                currentScreen = Screen.Adjustments;
                 break;
             case "HELP":
                 currentScreen = Screen.Help;
@@ -466,6 +533,7 @@ public class MRConfigurationController : MonoBehaviour
         {
             case Screen.Cabinets:
             case Screen.Added:
+            case Screen.Adjustments:
             case Screen.Help:
                 currentScreen = Screen.NavMain;
                 navMenu.selectedIndex = 0;
@@ -479,10 +547,10 @@ public class MRConfigurationController : MonoBehaviour
         }
     }
 
-    void ExecuteCabinetToggle(int index)
+    bool ExecuteCabinetToggle(int index)
     {
         if (registry == null || index < 0 || index >= catalogNames.Count)
-            return;
+            return false;
 
         string cabinetName = catalogNames[index];
         bool inScene = registry.IsCabinetInScene(cabinetName);
@@ -491,11 +559,11 @@ public class MRConfigurationController : MonoBehaviour
         {
             if (registry.TryRemoveCabinetFromScene(cabinetName))
                 ConfigManager.WriteConsole($"{LogPrefix} removed {cabinetName}");
+            return true;
         }
-        else
-        {
-            BeginAddCabinetWithRay(cabinetName);
-        }
+
+        BeginAddCabinetWithRay(cabinetName);
+        return false;
     }
 
     void BeginAddCabinetWithRay(string cabinetName)
@@ -528,8 +596,6 @@ public class MRConfigurationController : MonoBehaviour
             ? profile.facingAxis
             : PlacementFacingAxis.PositiveZ;
 
-        DrawPlacementRayHint(MRPlacementRayController.ExpectsStickRotationHint(profile, surfaceType));
-
         placementRay.BeginMove(
             root,
             surfaceType,
@@ -551,15 +617,23 @@ public class MRConfigurationController : MonoBehaviour
                 if (!saved)
                     ConfigManager.WriteConsoleWarning($"{LogPrefix} add confirm but save failed ({name})");
 
-                DrawCurrentScreen();
+                ShowIdleAfterExternalPlacement();
             },
             cancelCallback: () =>
             {
                 CancelPendingAdd(destroyCabinet: true);
-                DrawCurrentScreen();
+                ShowIdleAfterExternalPlacement();
             });
 
         ConfigManager.WriteConsole($"{LogPrefix} add ray begin {cabinetName}");
+    }
+
+    void ShowIdleAfterExternalPlacement()
+    {
+        if (sessionActive)
+            DrawCurrentScreen();
+        else
+            ShowIdle();
     }
 
     void CancelPendingAdd(bool destroyCabinet)
@@ -596,8 +670,6 @@ public class MRConfigurationController : MonoBehaviour
         movingPlacementId = placement.Id;
 
         MRPlacementProfile profile = MRPlacementProfile.Resolve(spawnedRoot);
-        DrawPlacementRayHint(MRPlacementRayController.ExpectsStickRotationHint(profile, placement.SurfaceType));
-
         placementRay.BeginMove(
             spawnedRoot,
             placement.SurfaceType,
@@ -611,13 +683,13 @@ public class MRConfigurationController : MonoBehaviour
                     ConfigManager.WriteConsoleWarning($"{LogPrefix} move confirm but save failed ({movingPlacementId})");
                 movingPlacementId = null;
                 RefreshPlacements();
-                DrawCurrentScreen();
+                ShowIdleAfterExternalPlacement();
             },
             cancelCallback: () =>
             {
                 placementMoveActive = false;
                 movingPlacementId = null;
-                DrawCurrentScreen();
+                ShowIdleAfterExternalPlacement();
             });
 
         ConfigManager.WriteConsole($"{LogPrefix} move begin {placement.DisplayLabel} ({placement.Id})");
@@ -793,6 +865,20 @@ public class MRConfigurationController : MonoBehaviour
 #endif
     }
 
+    float ReadStickX()
+    {
+#if UNITY_EDITOR
+        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+            return 1f;
+        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+            return -1f;
+        return Input.GetAxisRaw("Horizontal");
+#else
+        Vector2 stick = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch);
+        return stick.x;
+#endif
+    }
+
     bool WasMoveUp() =>
 #if UNITY_EDITOR
         Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W);
@@ -803,6 +889,20 @@ public class MRConfigurationController : MonoBehaviour
     bool WasMoveDown() =>
 #if UNITY_EDITOR
         Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S);
+#else
+        false;
+#endif
+
+    bool WasMoveLeft() =>
+#if UNITY_EDITOR
+        Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A);
+#else
+        false;
+#endif
+
+    bool WasMoveRight() =>
+#if UNITY_EDITOR
+        Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D);
 #else
         false;
 #endif

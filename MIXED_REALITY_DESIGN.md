@@ -8,7 +8,7 @@
 | **Versão de referência** | [0.5.0](https://github.com/curif/AgeOfJoy-2022.1/tree/0.5.0) |
 | **Licença** | GPL-3.0 |
 | **Status** | MVP fases 1–2c funcional na branch 0.5.0 (validado Quest 3) |
-| **Documento** | v1.2 — Maio de 2026 |
+| **Documento** | v1.3 — Maio de 2026 |
 
 ---
 
@@ -43,7 +43,9 @@ Simulador de fliperama em VR para Meta Quest, feito em Unity (C#), com máquinas
 - `mr-layout.yaml` **v3** persiste cabinets de jogo (Add/Remove/Move) com pose **relativa ao anchor MRUK** (`anchorUuid` + posição/rotação local); fallback v2 world-space para layouts antigos.
 - Pose do config cabinet: **PlayerPrefs** schema 3 (anchor-relative) ou 2 (world legacy), via `MRAnchorPoseResolver` — separado do yaml.
 - **First-time placement ray** para config cabinet (sem pose salva) e para Add/Move no catálogo ADDED (floor ray).
-- **Add/Move de cabinet de jogo:** CRT entra em idle, ficha ejectada, sai de `MR_EDIT`; jogador re-insere ficha após confirmar pose.
+- **Add/Move de cabinet de jogo:** CRT volta ao **idle** (`ShowIdle`), ficha ejectada, sai de `MR_EDIT`; placement ray no mundo; jogador re-insere ficha após confirmar pose. **Não** redesenhar menu CABINETS após Add (`HandleConfirm` guard).
+- Menu **ADJUSTMENTS:** escala global e posição Y no chão para **todos** os cabinets de jogo (`MRAdjustmentsSettings`, PlayerPrefs); passo **0,01**; stick **direito** ← →; baseline **1,00** = neutro.
+- Rotação no placement ray: stick **direito** ← → (floor cabinets).
 - Spawn MR aplica **`skinFromInformation`** (texturas/materiais) — espelha `CabinetsController` VR; `MRLibretroWarmup` inicializa Libretro na main thread antes do spawn.
 - **Locomotion VR desligada em MR** — move, turn e teleport suspensos via `ChangeControls.SetMrLocomotionSuspended`.
 - Occlusão avançada e **Meta Spatial Anchor API** (`OVRSpatialAnchor`) permanecem fases futuras; drift de tracking mitigado parcialmente por anchors MRUK.
@@ -338,7 +340,21 @@ Em `MR_EDIT`, o jogador abre o **CRT do `ConfigurationCabinetMiniMR`** (ficha/co
 - Catálogo de cabinets **disponíveis em `cabinetsdb`** (add com raio).
 - **Raio** do controller direito para apontar onde o cabinet ficará.
 
-**Fluxo Add/Move (cabinet de jogo):** ao selecionar Add ou Move, o CRT suspende (`SuspendEditForGameCabinetPlacement`), a ficha é ejectada, o modo sai de `MR_EDIT`, e o jogador usa o placement ray no chão. Após confirmar, deve **re-inserir a ficha** para voltar ao menu CRT.
+**Fluxo Add/Move (cabinet de jogo):** ao selecionar Add ou Move, `SuspendForExternalPlacement()` põe o CRT em idle (ecrã “Cabinet ready”), ejecta a ficha, sai de `MR_EDIT`, e o jogador usa o placement ray no chão. O menu **não** permanece na lista CABINETS/ADDED durante o ray. Após confirmar ou cancelar, o CRT mantém idle até **re-inserir a ficha**.
+
+### 10.1.1 ADJUSTMENTS (ajustes globais)
+
+Menu **ADJUSTMENTS** no CRT (`MRConfigurationController`):
+
+| Opção | Efeito | Default |
+|-------|--------|---------|
+| Scale Cabinets | Multiplicador de escala para **todos** os cabinets de chão | 1,00 |
+| Floor Cabinets Position | Offset Y global (`valor − 1,00` metros) | 1,00 |
+
+- Stick **direito** ↑↓ seleciona opção; ← → ajusta em passos de **0,01**.
+- Persistência: **PlayerPrefs** (`MR.Adjustments.*`), não `mr-layout.yaml`.
+- Alterações aplicam-se em tempo real via `MRLayoutRegistry.ApplyGlobalAdjustmentsToSpawnedFloorCabinets()`.
+- Não afeta o `ConfigurationCabinetMiniMR` (parede).
 
 ### 10.2 UI na mão
 
@@ -609,6 +625,7 @@ Assets/ramiro/
   PlacementOrientation.cs
   MRConfigurationCabinetController.cs
   MRConfigurationController.cs
+  MRAdjustmentsSettings.cs
   MREnvironmentSurfaces.cs
   MRVrSystemsGate.cs
   MRLibretroWarmup.cs

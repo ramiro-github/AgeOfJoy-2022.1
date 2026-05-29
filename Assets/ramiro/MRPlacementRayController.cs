@@ -216,6 +216,7 @@ public class MRPlacementRayController : MonoBehaviour
                     }
 
                     ApplyFloorPivotOffset(movingTarget, ref worldPos, worldRot);
+                    MRLayoutRegistry.ApplyFloorCabinetDisplayOffset(PlacementSurfaceType.Floor, ref worldPos);
                     ok = true;
                 }
                 break;
@@ -340,14 +341,14 @@ public class MRPlacementRayController : MonoBehaviour
 
     void ApplyStickRotationInput()
     {
-        float stickX = ReadLeftStickX();
+        float stickX = ReadRightStickX();
         if (Mathf.Abs(stickX) <= stickDeadZone)
             return;
 
         userYawOffsetDegrees += stickX * stickRotationSpeed * Time.deltaTime;
     }
 
-    static float ReadLeftStickX()
+    static float ReadRightStickX()
     {
 #if UNITY_EDITOR
         if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
@@ -356,7 +357,7 @@ public class MRPlacementRayController : MonoBehaviour
             return 1f;
         return Input.GetAxisRaw("Horizontal");
 #else
-        return OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch).x;
+        return OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).x;
 #endif
     }
 

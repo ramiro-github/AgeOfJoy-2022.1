@@ -16,13 +16,13 @@ public class MRPlacementProfile : MonoBehaviour
     [Tooltip("Local axis that points toward the viewer when auto-facing is used.")]
     public PlacementFacingAxis facingAxis = PlacementFacingAxis.PositiveZ;
 
-    [Tooltip("When enabled, left stick ← → rotates the object during placement ray (no auto-face).")]
+    [Tooltip("When enabled, right stick ← → rotates the object during placement ray (no auto-face).")]
     public bool allowStickRotation;
 
     [Tooltip("World axis for stick rotation. WorldYaw = eixo Y (girar no chão). WorldPitch = X. WorldRoll = Z.")]
     public PlacementStickRotationAxis stickRotationAxis = PlacementStickRotationAxis.WorldYaw;
 
-    [Tooltip("Rotation speed with left stick (degrees per second).")]
+    [Tooltip("Rotation speed with right stick (degrees per second).")]
     public float stickRotationSpeed = 90f;
 
     [Tooltip("Optional label for MR menus.")]

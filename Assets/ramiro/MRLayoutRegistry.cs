@@ -220,7 +220,12 @@ public class MRLayoutRegistry : MonoBehaviour
             Scale = 1f,
             SurfaceType = PlacementSurfaceType.Floor
         };
-        WriteStoredPose(placement, PlacementSurfaceType.Floor, worldPosition, worldRotation, anchorUuid);
+        WriteStoredPose(
+            placement,
+            PlacementSurfaceType.Floor,
+            WorldPositionForStorage(PlacementSurfaceType.Floor, worldPosition),
+            worldRotation,
+            anchorUuid);
         layout.AddPlacement(placement);
         layout.Version = AnchorRelativeLayoutVersion;
         layout.Save(LayoutFilePath);
@@ -320,11 +325,18 @@ public class MRLayoutRegistry : MonoBehaviour
             SurfaceType = PlacementSurfaceType.Floor,
             FacingAxis = PlacementFacingAxis.PositiveZ
         };
-        WriteStoredPose(placement, PlacementSurfaceType.Floor, worldPosition, worldRotation, anchorUuid);
+        WriteStoredPose(
+            placement,
+            PlacementSurfaceType.Floor,
+            WorldPositionForStorage(PlacementSurfaceType.Floor, worldPosition),
+            worldRotation,
+            anchorUuid);
 
         layout.AddPlacement(placement);
         layout.Version = AnchorRelativeLayoutVersion;
         layout.Save(LayoutFilePath);
+
+        root.transform.localScale = Vector3.one * GetEffectiveCabinetScale(placement);
 
         MRPlacedCabinet marker = root.GetComponent<MRPlacedCabinet>();
         if (marker == null)
@@ -367,12 +379,17 @@ public class MRLayoutRegistry : MonoBehaviour
         if (placement == null)
             return false;
 
-        WriteStoredPose(placement, placement.SurfaceType, worldPosition, worldRotation, anchorUuid);
+        Vector3 storedPosition = WorldPositionForStorage(placement.SurfaceType, worldPosition);
+        WriteStoredPose(placement, placement.SurfaceType, storedPosition, worldRotation, anchorUuid);
         layout.Version = AnchorRelativeLayoutVersion;
         layout.Save(LayoutFilePath);
 
         if (TryGetSpawnedRoot(placementId, out GameObject root))
+        {
             root.transform.SetPositionAndRotation(worldPosition, worldRotation);
+            if (placement.SurfaceType == PlacementSurfaceType.Floor)
+                root.transform.localScale = Vector3.one * GetEffectiveCabinetScale(placement);
+        }
 
         ConfigManager.WriteConsole($"{LogPrefix} updated pose {placement.DisplayLabel} ({placementId})");
         return true;
@@ -398,6 +415,7 @@ public class MRLayoutRegistry : MonoBehaviour
         }
 
         ReadWorldPose(placement, out Vector3 worldPos, out Quaternion worldRot);
+        ApplyFloorCabinetDisplayOffset(placement.SurfaceType, ref worldPos);
 
         if (!TrySpawnCabinetAtWorldPose(
                 placement.CabinetDBName,
@@ -409,8 +427,7 @@ public class MRLayoutRegistry : MonoBehaviour
                 out GameObject root))
             return false;
 
-        float scale = placement.Scale > 0f ? placement.Scale : 1f;
-        root.transform.localScale = Vector3.one * scale;
+        root.transform.localScale = Vector3.one * GetEffectiveCabinetScale(placement);
 
         MRPlacedCabinet marker = root.GetComponent<MRPlacedCabinet>();
         if (marker == null)
@@ -480,6 +497,7 @@ public class MRLayoutRegistry : MonoBehaviour
 
         spawnedRoot = cabinet.gameObject;
         DisableAutoFloorSnap(spawnedRoot);
+        spawnedRoot.transform.localScale = Vector3.one * MRAdjustmentsSettings.CabinetScale;
 
         if (!registerSpawned)
             ConfigManager.WriteConsole($"{LogPrefix} spawned transient {cabinetDBName} at {worldPos}");
@@ -501,6 +519,50 @@ public class MRLayoutRegistry : MonoBehaviour
         {
             ConfigManager.WriteConsoleException($"{LogPrefix} skinning failed for {cabInfo.name}", e);
         }
+    }
+
+    public void ApplyGlobalAdjustmentsToSpawnedFloorCabinets()
+    {
+        MRAdjustmentsSettings.EnsureLoaded();
+        if (layout == null)
+            return;
+
+        foreach (KeyValuePair<string, GameObject> entry in spawnedById)
+        {
+            if (entry.Value == null)
+                continue;
+
+            MRCabinetPlacement placement = layout.FindById(entry.Key);
+            if (placement == null || placement.SurfaceType != PlacementSurfaceType.Floor)
+                continue;
+
+            ReadWorldPose(placement, out Vector3 worldPos, out Quaternion worldRot);
+            ApplyFloorCabinetDisplayOffset(placement.SurfaceType, ref worldPos);
+            entry.Value.transform.SetPositionAndRotation(worldPos, worldRot);
+            entry.Value.transform.localScale = Vector3.one * GetEffectiveCabinetScale(placement);
+        }
+    }
+
+    public static float GetEffectiveCabinetScale(MRCabinetPlacement placement)
+    {
+        MRAdjustmentsSettings.EnsureLoaded();
+        float baseScale = placement != null && placement.Scale > 0f ? placement.Scale : 1f;
+        return baseScale * MRAdjustmentsSettings.CabinetScale;
+    }
+
+    public static Vector3 WorldPositionForStorage(PlacementSurfaceType surfaceType, Vector3 worldPosition)
+    {
+        MRAdjustmentsSettings.EnsureLoaded();
+        if (surfaceType == PlacementSurfaceType.Floor)
+            worldPosition.y -= MRAdjustmentsSettings.FloorCabinetYOffset;
+        return worldPosition;
+    }
+
+    public static void ApplyFloorCabinetDisplayOffset(PlacementSurfaceType surfaceType, ref Vector3 worldPosition)
+    {
+        MRAdjustmentsSettings.EnsureLoaded();
+        if (surfaceType == PlacementSurfaceType.Floor)
+            worldPosition.y += MRAdjustmentsSettings.FloorCabinetYOffset;
     }
 
     static void WriteStoredPose(
