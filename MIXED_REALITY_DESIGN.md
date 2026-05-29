@@ -7,8 +7,8 @@
 | **Projeto** | [curif/AgeOfJoy-2022.1](https://github.com/curif/AgeOfJoy-2022.1) |
 | **Versão de referência** | [0.5.0](https://github.com/curif/AgeOfJoy-2022.1/tree/0.5.0) |
 | **Licença** | GPL-3.0 |
-| **Status** | Implementação em progresso na branch 0.5.0 (MVP parcial já funcional) |
-| **Documento** | v1.1 — Maio de 2026 |
+| **Status** | MVP fases 1–2c funcional na branch 0.5.0 (validado Quest 3) |
+| **Documento** | v1.2 — Maio de 2026 |
 
 ---
 
@@ -39,11 +39,14 @@ Simulador de fliperama em VR para Meta Quest, feito em Unity (C#), com máquinas
 ### 2.3 Estado atual em relação ao MR
 
 - Implementação MR funcional em **`Assets/ramiro/`** (passthrough, modos, layout, menu CRT, placement ray).
-- Fluxo principal de edição: **`ConfigurationCabinetMiniMR`** com CRT + ficha (`MRConfigurationController`).
-- `mr-layout.yaml` persiste cabinets de jogo (Add/Remove/Move na lista ADDED).
-- Pose do config cabinet: **PlayerPrefs** (separado do yaml).
+- Fluxo principal de edição: **`ConfigurationCabinetMiniMR`** (`Resources/ramiro/PrefabsEnvironment/`) com CRT + ficha (`MRConfigurationController`).
+- `mr-layout.yaml` **v3** persiste cabinets de jogo (Add/Remove/Move) com pose **relativa ao anchor MRUK** (`anchorUuid` + posição/rotação local); fallback v2 world-space para layouts antigos.
+- Pose do config cabinet: **PlayerPrefs** schema 3 (anchor-relative) ou 2 (world legacy), via `MRAnchorPoseResolver` — separado do yaml.
+- **First-time placement ray** para config cabinet (sem pose salva) e para Add/Move no catálogo ADDED (floor ray).
+- **Add/Move de cabinet de jogo:** CRT entra em idle, ficha ejectada, sai de `MR_EDIT`; jogador re-insere ficha após confirmar pose.
+- Spawn MR aplica **`skinFromInformation`** (texturas/materiais) — espelha `CabinetsController` VR; `MRLibretroWarmup` inicializa Libretro na main thread antes do spawn.
 - **Locomotion VR desligada em MR** — move, turn e teleport suspensos via `ChangeControls.SetMrLocomotionSuspended`.
-- Occlusão avançada e anchor persistente permanecem como fases futuras.
+- Occlusão avançada e **Meta Spatial Anchor API** (`OVRSpatialAnchor`) permanecem fases futuras; drift de tracking mitigado parcialmente por anchors MRUK.
 
 ### 2.4 Princípio de contribuição (`Contributing.md`)
 
@@ -183,23 +186,20 @@ flowchart TB
 ### 6.2 Esquema proposto (YAML)
 
 ```yaml
-version: 1
-spatialAnchor:
-  id: ""                    # UUID do Meta Spatial Anchor (vazio = só origem local)
-  fallbackOrigin:
-    position: { x: 0, y: 0, z: 0 }
-    rotation: { x: 0, y: 0, z: 0, w: 1 }
+version: 3
 cabinets:
   - id: "cab-001"           # GUID estável para delete/move
     cabinetDBName: "pacman"
     rom: "pacman"
-    position: { x: 1.2, y: 0, z: -0.8 }
+    anchorUuid: "a1b2c3d4-..."   # OVRAnchor UUID do MRUK (v3+); vazio = pose world (v2 legacy)
+    position: { x: 1.2, y: 0, z: -0.8 }   # local ao anchor se anchorUuid presente
     rotation: { x: 0, y: 0.707, z: 0, w: 0.707 }
     scale: 1.0
     surfaceType: 0              # Floor=0, Wall=1 (PlacementSurfaceType)
     facingAxis: 0               # PlacementFacingAxis (ex.: NegativeX=3 para ConfigurationCabinetMiniMR)
-    addedAt: "2026-05-22T12:00:00Z"   # opcional
 ```
+
+**Nota:** layouts v1/v2 (pose world absoluta) continuam legíveis; novos saves usam v3 com `anchorUuid`.
 
 ### 6.3 Regras
 
@@ -220,6 +220,7 @@ public class MRCabinetPlacement
     public Vector3Serializable Position;
     public QuaternionSerializable Rotation;
     public float Scale = 1f;
+    public string AnchorUuid;   // MRUK OVRAnchor UUID (v3+)
     public PlacementSurfaceType SurfaceType = PlacementSurfaceType.Floor;
     public PlacementFacingAxis FacingAxis = PlacementFacingAxis.PositiveZ;
 }
@@ -227,8 +228,7 @@ public class MRCabinetPlacement
 [Serializable]
 public class MRLayout
 {
-    public int Version = 1;
-    public MRSpatialAnchorData SpatialAnchor;
+    public int Version = 3;
     public List<MRCabinetPlacement> Cabinets = new();
 }
 ```
@@ -243,12 +243,19 @@ Sem âncora, posições salvas em YAML **derivam** entre sessões quando o track
 
 ### 7.2 Estratégia em fases
 
-| Fase | Método | Persistência |
-|------|--------|--------------|
-| MVP (2) | Origem no primeiro setup MR (`TrackingOriginMode.Floor`) | YAML relativo à origem da sessão |
-| Ideal (4) | Meta Spatial Anchor API | YAML + `spatialAnchor.id` |
+| Fase | Método | Persistência | Estado |
+|------|--------|--------------|--------|
+| MVP (2) | Pose world absoluta | YAML v2 | ✅ legado |
+| **2c+** | **MRUK `OVRAnchor.Uuid`** | YAML v3 + PlayerPrefs schema 3 (`MRAnchorPoseResolver`) | ✅ validado Quest 3 |
+| Ideal (4) | Meta **Spatial Anchor API** (`OVRSpatialAnchor`) | Persistência cross-session independente do Scene API | ❌ futuro |
 
-### 7.3 Fluxo ao entrar no MR
+### 7.3 Implementação atual (`MRAnchorPoseResolver`)
+
+- Ao confirmar placement ray, grava `anchorUuid` + posição/rotação **locais** ao anchor MRUK atingido (parede ou chão).
+- Ao carregar (`SpawnAll`, config cabinet), resolve world pose via `MRUKAnchor` correspondente; se anchor ausiente, fallback para pose world (v2).
+- Config cabinet: chaves PlayerPrefs `MR.ConfigurationCabinetMiniMR.*` com schema 2 (world) ou 3 (anchor-relative).
+
+### 7.4 Fluxo ao entrar no MR
 
 1. Ativar passthrough.
 2. Resolver âncora (ou criar origem).
@@ -325,11 +332,13 @@ Implementação: `MRVrSystemsGate.SuspendForMR()` → `ChangeControls.SetMrLocom
 
 ### 10.1 Visão geral
 
-Em `MR_EDIT`, o jogador abre um **painel na mão** com:
+Em `MR_EDIT`, o jogador abre o **CRT do `ConfigurationCabinetMiniMR`** (ficha/coin) com:
 
-- Lista de cabinets **já no ambiente** (delete, opcionalmente move).
-- Catálogo de cabinets **disponíveis em `cabinetsdb`** (add).
-- **Raio** da mão/controller para apontar onde o novo cabinet ficará.
+- Lista de cabinets **já no ambiente** (delete, move com raio).
+- Catálogo de cabinets **disponíveis em `cabinetsdb`** (add com raio).
+- **Raio** do controller direito para apontar onde o cabinet ficará.
+
+**Fluxo Add/Move (cabinet de jogo):** ao selecionar Add ou Move, o CRT suspende (`SuspendEditForGameCabinetPlacement`), a ficha é ejectada, o modo sai de `MR_EDIT`, e o jogador usa o placement ray no chão. Após confirmar, deve **re-inserir a ficha** para voltar ao menu CRT.
 
 ### 10.2 UI na mão
 
@@ -545,9 +554,9 @@ stateDiagram-v2
 | **1** | Passthrough + `ExperienceMode` + toggle imersivo | Alterna VR/MR sem crash; MR sem cabinets |
 | **2a** | `mr-layout.yaml` + spawn ao entrar MR | Cabinets aparecem nas poses salvas |
 | **2b** | UI na mão: listar + deletar | Remove do ambiente e persiste |
-| **2c** | Raio + preview + adicionar (+ mover) | ✅ parcial — ray Wall/Floor, move ADDED + config cabinet; add catálogo ainda spawn direto |
+| **2c** | Raio + preview + adicionar (+ mover) | ✅ ray Wall/Floor; Add/Move ADDED + config cabinet; suspend CRT + re-coin; input A edge |
 | **3** | Occlusão por paredes reais | Cabinets atrás de paredes são tampados |
-| **4** | Spatial Anchor Meta | Layout estável entre sessões |
+| **4** | Spatial Anchor Meta | Parcial: MRUK anchor UUID (v3); falta `OVRSpatialAnchor` API completa |
 | **5** | Polish: limites, performance, Quest 2 doc | Testes comunitários |
 
 **MVP comunitário:** fases **1 + 2a + 2b + 2c**.
@@ -559,7 +568,7 @@ stateDiagram-v2
 | Risco | Impacto | Mitigação |
 |-------|---------|------------|
 | Memória Quest | OOM | Despawn VR em MR; limite de cabinets |
-| Drift de tracking | Layout “anda” | Spatial Anchor (fase 4) |
+| Drift de tracking | Layout “anda” | MRUK anchor-relative v3 (mitiga); `OVRSpatialAnchor` (fase 4) |
 | NPCs / NavMesh em MR | Comportamento estranho | Desligar NPCs em MR no MVP |
 | Teleporte por slot | Não aplicável | Locomotion **desligada** em MR; proximidade física |
 | Autenticidade | UI quebra imersão | `GenericMenu` / terminal retrô |
@@ -594,12 +603,16 @@ Assets/ramiro/
   MixedRealityManager.cs
   MixedRealityBootstrap.cs
   MRLayoutRegistry.cs
+  MRAnchorPoseResolver.cs
   MRPlacementRayController.cs
+  MRPlacementProfile.cs
   PlacementOrientation.cs
   MRConfigurationCabinetController.cs
   MRConfigurationController.cs
   MREnvironmentSurfaces.cs
   MRVrSystemsGate.cs
+  MRLibretroWarmup.cs
+  MRTestGameCabinetSpawn.cs
   MRPassthroughController.cs
   MRSceneBootstrap.cs
   MRCameraRigShim.cs
@@ -608,8 +621,8 @@ Assets/ramiro/
   MREditMenuInput.cs
   Data/
     MRLayout.cs
-  Prefabs/ (via Resources)
-    Resources/ramiro/ConfigurationCabinetMiniMR.prefab
+  Resources/ (via Unity)
+    Resources/ramiro/PrefabsEnvironment/ConfigurationCabinetMiniMR.prefab
 ```
 
 *(Design original previa `Assets/curif/MixedReality/` — código real está em `Assets/ramiro/`.)*
