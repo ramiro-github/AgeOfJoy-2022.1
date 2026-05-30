@@ -141,6 +141,20 @@ public class MixedRealityManager : MonoBehaviour
         BeginTransition(EnterMRCoroutine());
     }
 
+    /// <summary>Immersive VR→MR via phone booth (not implemented yet — use EnterMR / toggle).</summary>
+    public void EnterMRFromPhoneBooth(MRPhoneBoothPortal portal)
+    {
+        ConfigManager.WriteConsoleWarning($"{LogPrefix} EnterMRFromPhoneBooth not implemented — use toggle or EnterMR()");
+        MRTransitionLog.LogWarning("EnterMRFromPhoneBooth not implemented");
+    }
+
+    /// <summary>Immersive MR→VR via phone booth (not implemented yet — use EnterVR / toggle).</summary>
+    public void EnterVRFromPhoneBooth(MRPhoneBoothPortal portal)
+    {
+        ConfigManager.WriteConsoleWarning($"{LogPrefix} EnterVRFromPhoneBooth not implemented — use toggle or EnterVR()");
+        MRTransitionLog.LogWarning("EnterVRFromPhoneBooth not implemented");
+    }
+
     public void EnterVR()
     {
         MRTransitionLog.LogStep("EnterVR", "requested");
