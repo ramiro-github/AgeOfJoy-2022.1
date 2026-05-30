@@ -10,10 +10,10 @@ using UnityEngine;
 /// </summary>
 public class MRPlacementProfile : MonoBehaviour
 {
-    [Tooltip("Where this object can be placed (floor, wall, …).")]
+    [Tooltip("Where this object can be placed (floor, wall, ceiling, …).")]
     public PlacementSurfaceType surfaceType = PlacementSurfaceType.Floor;
 
-    [Tooltip("Local axis that points toward the viewer when auto-facing is used.")]
+    [Tooltip("Local axis that points toward the viewer when auto-facing is used (horizontal spin on floor/ceiling).")]
     public PlacementFacingAxis facingAxis = PlacementFacingAxis.PositiveZ;
 
     [Tooltip("When enabled, right stick ← → rotates the object during placement ray (no auto-face).")]

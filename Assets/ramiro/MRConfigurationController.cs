@@ -21,9 +21,9 @@ public class MRConfigurationController : MonoBehaviour
         Idle,
         NavMain,
         Cabinets,
-        Added,
         Adjustments,
         PhoneBooth,
+        Environment,
         Help
     }
 
@@ -42,9 +42,10 @@ public class MRConfigurationController : MonoBehaviour
 
     GenericMenu navMenu;
     readonly List<string> catalogNames = new List<string>();
-    readonly List<MRCabinetPlacement> placements = new List<MRCabinetPlacement>();
+    readonly List<string> envCatalogNames = new List<string>();
 
     MRLayoutRegistry registry;
+    MREnvironmentRegistry envRegistry;
     Transform mrSpaceOrigin;
     MRPlacementRayController placementRay;
 
@@ -55,10 +56,16 @@ public class MRConfigurationController : MonoBehaviour
     float navCooldown;
     bool sessionActive;
     bool confirmControlWasActive;
+    bool secondaryControlWasActive;
+    bool backControlWasActive;
     bool placementMoveActive;
+    bool placementEnvMoveActive;
     bool placementAddActive;
+    bool pendingAddIsEnvironment;
     string movingPlacementId;
+    string movingEnvPlacementId;
     string pendingAddCabinetName;
+    string pendingAddEnvPrefabName;
     GameObject pendingAddRoot;
 
     public bool IsSessionActive => sessionActive;
@@ -98,19 +105,26 @@ public class MRConfigurationController : MonoBehaviour
             return;
 
         registry = EnsureRegistry();
+        envRegistry = EnsureEnvironmentRegistry();
         mrSpaceOrigin = EnsureMrSpaceOrigin();
         placementRay = EnsurePlacementRayController();
         MRAdjustmentsSettings.EnsureLoaded();
         MRPhoneBoothSettings.EnsureLoaded();
         registry.EnsureLayoutLoaded();
+        envRegistry.EnsureLayoutLoaded();
         registry.SpawnAll(mrSpaceOrigin);
+        envRegistry.SpawnAll(mrSpaceOrigin);
 
         MRCatalogBootstrap.PrepareCatalog(seedExampleCabinetInEditor);
         RefreshCatalog();
+        MREnvironmentCatalog.RefreshCache();
+        RefreshEnvironmentCatalog();
 
         setupActionMap();
         sessionActive = true;
         confirmControlWasActive = false;
+        secondaryControlWasActive = false;
+        backControlWasActive = false;
         coinSlot?.insertCoin();
 
         currentScreen = Screen.NavMain;
@@ -130,10 +144,14 @@ public class MRConfigurationController : MonoBehaviour
 
         sessionActive = false;
         confirmControlWasActive = false;
+        secondaryControlWasActive = false;
+        backControlWasActive = false;
         placementMoveActive = false;
+        placementEnvMoveActive = false;
         placementAddActive = false;
         movingPlacementId = null;
-        CancelPendingAdd(destroyCabinet: true);
+        movingEnvPlacementId = null;
+        CancelPendingAdd(destroyProp: true);
         if (placementRay != null && placementRay.IsActive)
             placementRay.CancelActive();
         currentScreen = Screen.Idle;
@@ -148,9 +166,13 @@ public class MRConfigurationController : MonoBehaviour
     {
         sessionActive = false;
         confirmControlWasActive = false;
+        secondaryControlWasActive = false;
+        backControlWasActive = false;
         placementMoveActive = false;
+        placementEnvMoveActive = false;
         placementAddActive = false;
         movingPlacementId = null;
+        movingEnvPlacementId = null;
         currentScreen = Screen.Idle;
         cleanActionMap();
         ActivateShader(false);
@@ -163,7 +185,7 @@ public class MRConfigurationController : MonoBehaviour
         if (!sessionActive || screen == null)
             return;
 
-        if (placementMoveActive || placementAddActive)
+        if (placementMoveActive || placementEnvMoveActive || placementAddActive)
             return;
 
         navCooldown -= Time.deltaTime;
@@ -209,13 +231,21 @@ public class MRConfigurationController : MonoBehaviour
             else
                 HandleConfirm();
         }
+
+        if (WasSecondaryPressed())
+        {
+            if (navCooldown > 0f)
+                SyncSecondaryControlEdgeState();
+            else
+                HandleSecondaryAction();
+        }
     }
 
     void BuildNavMenu()
     {
         navMenu = new GenericMenu(screen, "MR CONFIGURATION");
         navMenu.AddOption("CABINETS", "Catalog: add or remove in MR space");
-        navMenu.AddOption("ADDED", "Cabinets in mr-layout.yaml");
+        navMenu.AddOption("ENVIRONMENT", "Props from PrefabsEnvironment");
         navMenu.AddOption("MOVE CONFIG", "Reposition ConfigurationCabinetMiniMR");
         navMenu.AddOption("ADJUSTMENTS", "Scale and floor position for game cabinets");
         navMenu.AddOption("PHONE BOOTH", "Show or hide phone booth in MR");
@@ -230,18 +260,10 @@ public class MRConfigurationController : MonoBehaviour
         catalogNames.Sort();
     }
 
-    void RefreshPlacements()
+    void RefreshEnvironmentCatalog()
     {
-        placements.Clear();
-        if (registry == null)
-            return;
-
-        registry.EnsureLayoutLoaded();
-        foreach (MRCabinetPlacement placement in registry.Placements)
-        {
-            if (placement != null && !string.IsNullOrEmpty(placement.Id))
-                placements.Add(placement);
-        }
+        envCatalogNames.Clear();
+        envCatalogNames.AddRange(MREnvironmentCatalog.GetPlaceablePrefabNames());
     }
 
     void DrawCurrentScreen()
@@ -257,14 +279,14 @@ public class MRConfigurationController : MonoBehaviour
             case Screen.Cabinets:
                 DrawCabinetsPage();
                 break;
-            case Screen.Added:
-                DrawAddedPage();
-                break;
             case Screen.Adjustments:
                 DrawAdjustmentsPage();
                 break;
             case Screen.PhoneBooth:
                 DrawPhoneBoothPage();
+                break;
+            case Screen.Environment:
+                DrawEnvironmentPage();
                 break;
             case Screen.Help:
                 DrawHelpPage();
@@ -311,41 +333,9 @@ public class MRConfigurationController : MonoBehaviour
         if (selectedListIndex >= 0 && selectedListIndex < catalogNames.Count)
             screen.Print(1, 20, Truncate(catalogNames[selectedListIndex], 36), false);
 
-        DrawFooter("A: Add/Rem   B: back");
-    }
-
-    void DrawAddedPage()
-    {
-        screen.PrintCentered(0, "ADDED CABINETS", true);
-        screen.PrintLine(1, false, '-');
-
-        RefreshPlacements();
-
-        if (placements.Count == 0)
-        {
-            screen.PrintCentered(8, "(empty)", true);
-            DrawFooter("B: back");
-            return;
-        }
-
-        int row = 3;
-        for (int i = 0; i < VisibleCabinetRows; i++)
-        {
-            int idx = listScrollOffset + i;
-            if (idx >= placements.Count)
-                break;
-
-            MRCabinetPlacement p = placements[idx];
-            bool selected = idx == selectedListIndex;
-            float x = p.Position != null ? p.Position.X : 0f;
-            float y = p.Position != null ? p.Position.Y : 0f;
-            float z = p.Position != null ? p.Position.Z : 0f;
-            string line = Truncate(p.DisplayLabel, 16) + $" {x:F1},{y:F1},{z:F1}";
-            screen.Print(1, row, selected ? "> " + line : "  " + line, selected);
-            row++;
-        }
-
-        DrawFooter("A: move   B: back");
+        bool selectedInScene = selectedListIndex >= 0 && selectedListIndex < catalogNames.Count
+            && registry != null && registry.IsCabinetInScene(catalogNames[selectedListIndex]);
+        DrawFooter(selectedInScene ? "A: Rem   Y: move   B: back" : "A: Add   B: back");
     }
 
     void DrawAdjustmentsPage()
@@ -364,6 +354,49 @@ public class MRConfigurationController : MonoBehaviour
 
         screen.Print(1, 10, "1.00 = default", false);
         DrawFooter("R stick: select/adjust +/-0.01   B: back");
+    }
+
+    void DrawEnvironmentPage()
+    {
+        screen.PrintCentered(0, "ENVIRONMENT", true);
+        screen.PrintLine(1, false, '-');
+
+        if (envCatalogNames.Count == 0)
+        {
+            screen.PrintCentered(8, "No props found", true);
+            screen.PrintCentered(10, "PrefabsEnvironment/", false);
+            DrawFooter("B: back");
+            return;
+        }
+
+        screen.Print(1, 2, "Name", false);
+        screen.Print(22, 2, "In", false);
+        screen.Print(28, 2, "Act", false);
+        screen.PrintLine(3, false, '-');
+
+        int row = 4;
+        for (int i = 0; i < VisibleCabinetRows; i++)
+        {
+            int idx = listScrollOffset + i;
+            if (idx >= envCatalogNames.Count)
+                break;
+
+            string prefabName = envCatalogNames[idx];
+            string label = Truncate(MREnvironmentCatalog.GetDisplayLabel(prefabName), 18);
+            bool inScene = envRegistry != null && envRegistry.IsPrefabInScene(prefabName);
+            bool selected = idx == selectedListIndex;
+
+            string line = PadRight(label, 20) + (inScene ? "Yes" : " No") + " " + (inScene ? "Rem" : "Add");
+            screen.Print(1, row, selected ? "> " + line : "  " + line, selected);
+            row++;
+        }
+
+        if (selectedListIndex >= 0 && selectedListIndex < envCatalogNames.Count)
+            screen.Print(1, 20, Truncate(envCatalogNames[selectedListIndex], 36), false);
+
+        bool selectedInScene = selectedListIndex >= 0 && selectedListIndex < envCatalogNames.Count
+            && envRegistry != null && envRegistry.IsPrefabInScene(envCatalogNames[selectedListIndex]);
+        DrawFooter(selectedInScene ? "A: Rem   Y: move   B: back" : "A: Add   B: back");
     }
 
     void DrawPhoneBoothPage()
@@ -387,16 +420,18 @@ public class MRConfigurationController : MonoBehaviour
     {
         screen.PrintCentered(0, "HELP", true);
         screen.Print(2, 3, "Up/Down: navigate lists", false);
-        screen.Print(2, 5, "A: Add/Remove/Move", false);
+        screen.Print(2, 5, "A: Add/Remove   Y: move", false);
         screen.Print(2, 7, "B: back / close panel", false);
         screen.Print(2, 9, "Add/Move: floor ray", false);
         screen.Print(2, 10, "Adjustments: scale/floor", false);
-        screen.Print(2, 11, "Phone booth: show/hide", false);
-        screen.Print(2, 12, "R stick L/R: adjust +/-0.01", false);
-        screen.Print(2, 13, "R stick L/R: rotate Y*", false);
-        screen.Print(2, 14, "* floor cabinets / prefab", false);
-        screen.Print(2, 15, "Catalog = cabinetsdb/", false);
-        screen.Print(2, 16, "In Scene = mr-layout.yaml", false);
+        screen.Print(2, 11, "Environment: props", false);
+        screen.Print(2, 12, "Phone booth: show/hide", false);
+        screen.Print(2, 13, "R stick L/R: adjust +/-0.01", false);
+        screen.Print(2, 14, "R stick L/R: rotate Y*", false);
+        screen.Print(2, 15, "* floor/ceiling/wall prefab", false);
+        screen.Print(2, 16, "Catalog = cabinetsdb/", false);
+        screen.Print(2, 17, "Env = PrefabsEnvironment/", false);
+        screen.Print(2, 18, "In Scene = mr-layout.yaml", false);
         DrawFooter("B: back");
     }
 
@@ -422,7 +457,7 @@ public class MRConfigurationController : MonoBehaviour
         return currentScreen switch
         {
             Screen.Cabinets => catalogNames.Count,
-            Screen.Added => placements.Count,
+            Screen.Environment => envCatalogNames.Count,
             _ => 0
         };
     }
@@ -440,7 +475,7 @@ public class MRConfigurationController : MonoBehaviour
                 break;
 
             case Screen.Cabinets:
-            case Screen.Added:
+            case Screen.Environment:
                 int count = GetListCount();
                 if (count == 0)
                     return;
@@ -507,8 +542,12 @@ public class MRConfigurationController : MonoBehaviour
                     DrawCurrentScreen();
                 }
                 break;
-            case Screen.Added:
-                BeginMoveSelectedPlacement();
+            case Screen.Environment:
+                if (ExecuteEnvironmentToggle(selectedListIndex))
+                {
+                    RefreshEnvironmentCatalog();
+                    DrawCurrentScreen();
+                }
                 break;
             case Screen.PhoneBooth:
                 MRPhoneBoothVisibility.Toggle();
@@ -526,17 +565,17 @@ public class MRConfigurationController : MonoBehaviour
                 listScrollOffset = 0;
                 currentScreen = Screen.Cabinets;
                 break;
-            case "ADDED":
-                selectedListIndex = 0;
-                listScrollOffset = 0;
-                currentScreen = Screen.Added;
-                break;
             case "ADJUSTMENTS":
                 selectedAdjustmentIndex = 0;
                 currentScreen = Screen.Adjustments;
                 break;
             case "PHONE BOOTH":
                 currentScreen = Screen.PhoneBooth;
+                break;
+            case "ENVIRONMENT":
+                selectedListIndex = 0;
+                listScrollOffset = 0;
+                currentScreen = Screen.Environment;
                 break;
             case "HELP":
                 currentScreen = Screen.Help;
@@ -553,16 +592,76 @@ public class MRConfigurationController : MonoBehaviour
 
         navCooldown = navRepeatDelay;
         SyncConfirmControlEdgeState();
+        SyncBackControlEdgeState();
         DrawCurrentScreen();
     }
 
     void SyncConfirmControlEdgeState()
     {
         confirmControlWasActive = ControlActive(LC.JOYPAD_A);
+        secondaryControlWasActive = ControlActive(LC.JOYPAD_Y);
+        backControlWasActive = IsBackControlActive();
 #if !UNITY_EDITOR
         if (OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RTouch))
             confirmControlWasActive = true;
+        if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.LTouch))
+            secondaryControlWasActive = true;
+        if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.RTouch))
+            backControlWasActive = true;
 #endif
+    }
+
+    void SyncSecondaryControlEdgeState()
+    {
+        secondaryControlWasActive = ControlActive(LC.JOYPAD_Y);
+#if !UNITY_EDITOR
+        if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.LTouch))
+            secondaryControlWasActive = true;
+#endif
+    }
+
+    void SyncBackControlEdgeState()
+    {
+        backControlWasActive = IsBackControlActive();
+    }
+
+    bool IsBackControlActive()
+    {
+        bool active = ControlActive(LC.JOYPAD_B) || ControlActive(LC.JOYPAD_X);
+#if UNITY_EDITOR
+        if (Input.GetKey(KeyCode.Backspace)
+            || Input.GetKey(KeyCode.B)
+            || Input.GetKey(KeyCode.Escape)
+            || Input.GetKey(KeyCode.JoystickButton1))
+            active = true;
+#else
+        if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.RTouch))
+            active = true;
+#endif
+        return active;
+    }
+
+    void HandleSecondaryAction()
+    {
+        switch (currentScreen)
+        {
+            case Screen.Cabinets:
+                if (selectedListIndex >= 0 && selectedListIndex < catalogNames.Count)
+                {
+                    string cabinetName = catalogNames[selectedListIndex];
+                    if (registry != null && registry.IsCabinetInScene(cabinetName))
+                        BeginMoveCabinetByCatalogName(cabinetName);
+                }
+                break;
+            case Screen.Environment:
+                if (selectedListIndex >= 0 && selectedListIndex < envCatalogNames.Count)
+                {
+                    string prefabName = envCatalogNames[selectedListIndex];
+                    if (envRegistry != null && envRegistry.IsPrefabInScene(prefabName))
+                        BeginMoveEnvByPrefabName(prefabName);
+                }
+                break;
+        }
     }
 
     void HandleBack()
@@ -570,20 +669,154 @@ public class MRConfigurationController : MonoBehaviour
         switch (currentScreen)
         {
             case Screen.Cabinets:
-            case Screen.Added:
             case Screen.Adjustments:
             case Screen.PhoneBooth:
+            case Screen.Environment:
             case Screen.Help:
                 currentScreen = Screen.NavMain;
                 navMenu.selectedIndex = 0;
                 navCooldown = navRepeatDelay;
                 SyncConfirmControlEdgeState();
+                SyncBackControlEdgeState();
                 DrawCurrentScreen();
                 break;
             case Screen.NavMain:
                 MRConfigurationCabinetController.Instance?.CloseEdit();
                 break;
         }
+    }
+
+    bool ExecuteEnvironmentToggle(int index)
+    {
+        if (envRegistry == null || index < 0 || index >= envCatalogNames.Count)
+            return false;
+
+        string prefabName = envCatalogNames[index];
+        bool inScene = envRegistry.IsPrefabInScene(prefabName);
+
+        if (inScene)
+        {
+            if (envRegistry.TryRemovePrefabFromScene(prefabName))
+                ConfigManager.WriteConsole($"{LogPrefix} removed env prop {prefabName}");
+            return true;
+        }
+
+        BeginAddEnvironmentWithRay(prefabName);
+        return false;
+    }
+
+    void BeginAddEnvironmentWithRay(string prefabName)
+    {
+        if (envRegistry == null || placementRay == null || placementMoveActive || placementEnvMoveActive || placementAddActive)
+            return;
+
+        if (placementRay.IsActive)
+            return;
+
+        MRConfigurationCabinetController.Instance?.SuspendEditForGameCabinetPlacement();
+
+        GameObject prefab = MREnvironmentCatalog.LoadPrefab(prefabName);
+        MRPlacementProfile prefabProfile = prefab != null ? prefab.GetComponent<MRPlacementProfile>() : null;
+        PlacementSurfaceType initialSurface = prefabProfile != null
+            ? prefabProfile.surfaceType
+            : PlacementSurfaceType.Floor;
+        ComputeInitialPlacementPose(initialSurface, out Vector3 worldPos, out Quaternion worldRot);
+
+        if (!envRegistry.TrySpawnTransientProp(prefabName, mrSpaceOrigin, worldPos, worldRot, out GameObject root))
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} env add ray spawn failed for {prefabName}");
+            return;
+        }
+
+        placementAddActive = true;
+        pendingAddIsEnvironment = true;
+        pendingAddEnvPrefabName = prefabName;
+        pendingAddCabinetName = null;
+        pendingAddRoot = root;
+
+        MRPlacementProfile profile = MRPlacementProfile.Resolve(root);
+        PlacementSurfaceType surfaceType = profile != null
+            ? profile.surfaceType
+            : PlacementSurfaceType.Floor;
+        PlacementFacingAxis facingAxis = profile != null
+            ? profile.facingAxis
+            : PlacementFacingAxis.PositiveZ;
+
+        placementRay.BeginMove(
+            root,
+            surfaceType,
+            facingAxis,
+            confirmCallback: (finalPos, finalRot, anchorUuid) =>
+            {
+                placementAddActive = false;
+                string name = pendingAddEnvPrefabName;
+                GameObject spawned = pendingAddRoot;
+                pendingAddEnvPrefabName = null;
+                pendingAddIsEnvironment = false;
+                pendingAddRoot = null;
+
+                if (spawned != null)
+                    spawned.transform.SetPositionAndRotation(finalPos, finalRot);
+
+                bool saved = envRegistry.TryFinalizeTransientAdd(
+                    name, spawned, mrSpaceOrigin, finalPos, finalRot, anchorUuid);
+
+                if (!saved)
+                    ConfigManager.WriteConsoleWarning($"{LogPrefix} env add confirm but save failed ({name})");
+
+                ShowIdleAfterExternalPlacement();
+            },
+            cancelCallback: () =>
+            {
+                CancelPendingAdd(destroyProp: true);
+                ShowIdleAfterExternalPlacement();
+            });
+
+        ConfigManager.WriteConsole($"{LogPrefix} env add ray begin {prefabName}");
+    }
+
+    void BeginMoveEnvByPrefabName(string prefabName)
+    {
+        if (envRegistry == null || placementRay == null || placementEnvMoveActive || placementMoveActive)
+            return;
+
+        MREnvironmentPlacement placement = envRegistry.FindPlacementByPrefabName(prefabName);
+        if (placement == null || string.IsNullOrEmpty(placement.Id))
+            return;
+
+        if (!envRegistry.TryGetSpawnedRoot(placement.Id, out GameObject spawnedRoot) || spawnedRoot == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} env move skipped, spawned root missing for {placement.Id}");
+            return;
+        }
+
+        MRConfigurationCabinetController.Instance?.SuspendEditForGameCabinetPlacement();
+
+        placementEnvMoveActive = true;
+        movingEnvPlacementId = placement.Id;
+
+        placementRay.BeginMove(
+            spawnedRoot,
+            placement.SurfaceType,
+            placement.FacingAxis,
+            confirmCallback: (worldPos, worldRot, anchorUuid) =>
+            {
+                placementEnvMoveActive = false;
+                bool saved = envRegistry.TryUpdatePlacementPose(
+                    movingEnvPlacementId, mrSpaceOrigin, worldPos, worldRot, anchorUuid);
+                if (!saved)
+                    ConfigManager.WriteConsoleWarning($"{LogPrefix} env move confirm but save failed ({movingEnvPlacementId})");
+                movingEnvPlacementId = null;
+                ShowIdleAfterExternalPlacement();
+            },
+            cancelCallback: () =>
+            {
+                placementEnvMoveActive = false;
+                movingEnvPlacementId = null;
+                ShowIdleAfterExternalPlacement();
+            });
+
+        ConfigManager.WriteConsole($"{LogPrefix} env move begin {placement.DisplayLabel} ({placement.Id})");
     }
 
     bool ExecuteCabinetToggle(int index)
@@ -624,7 +857,9 @@ public class MRConfigurationController : MonoBehaviour
         }
 
         placementAddActive = true;
+        pendingAddIsEnvironment = false;
         pendingAddCabinetName = cabinetName;
+        pendingAddEnvPrefabName = null;
         pendingAddRoot = root;
 
         MRPlacementProfile profile = MRPlacementProfile.Resolve(root);
@@ -660,7 +895,7 @@ public class MRConfigurationController : MonoBehaviour
             },
             cancelCallback: () =>
             {
-                CancelPendingAdd(destroyCabinet: true);
+                CancelPendingAdd(destroyProp: true);
                 ShowIdleAfterExternalPlacement();
             });
 
@@ -675,25 +910,29 @@ public class MRConfigurationController : MonoBehaviour
             ShowIdle();
     }
 
-    void CancelPendingAdd(bool destroyCabinet)
+    void CancelPendingAdd(bool destroyProp)
     {
         placementAddActive = false;
-        if (destroyCabinet && registry != null && pendingAddRoot != null)
-            registry.DestroyTransientCabinet(pendingAddRoot);
+        if (destroyProp && pendingAddRoot != null)
+        {
+            if (pendingAddIsEnvironment && envRegistry != null)
+                envRegistry.DestroyTransientProp(pendingAddRoot);
+            else if (registry != null)
+                registry.DestroyTransientCabinet(pendingAddRoot);
+        }
 
         pendingAddCabinetName = null;
+        pendingAddEnvPrefabName = null;
+        pendingAddIsEnvironment = false;
         pendingAddRoot = null;
     }
 
-    void BeginMoveSelectedPlacement()
+    void BeginMoveCabinetByCatalogName(string cabinetDBName)
     {
-        if (registry == null || placementRay == null || placementMoveActive)
+        if (registry == null || placementRay == null || placementMoveActive || placementEnvMoveActive)
             return;
 
-        if (selectedListIndex < 0 || selectedListIndex >= placements.Count)
-            return;
-
-        MRCabinetPlacement placement = placements[selectedListIndex];
+        MRCabinetPlacement placement = registry.FindPlacementByCabinetDBName(cabinetDBName);
         if (placement == null || string.IsNullOrEmpty(placement.Id))
             return;
 
@@ -708,7 +947,6 @@ public class MRConfigurationController : MonoBehaviour
         placementMoveActive = true;
         movingPlacementId = placement.Id;
 
-        MRPlacementProfile profile = MRPlacementProfile.Resolve(spawnedRoot);
         placementRay.BeginMove(
             spawnedRoot,
             placement.SurfaceType,
@@ -721,7 +959,6 @@ public class MRConfigurationController : MonoBehaviour
                 if (!saved)
                     ConfigManager.WriteConsoleWarning($"{LogPrefix} move confirm but save failed ({movingPlacementId})");
                 movingPlacementId = null;
-                RefreshPlacements();
                 ShowIdleAfterExternalPlacement();
             },
             cancelCallback: () =>
@@ -755,10 +992,25 @@ public class MRConfigurationController : MonoBehaviour
 
     void ComputeInitialFloorPose(out Vector3 worldPos, out Quaternion worldRot)
     {
+        ComputeInitialPlacementPose(PlacementSurfaceType.Floor, out worldPos, out worldRot);
+    }
+
+    void ComputeInitialPlacementPose(PlacementSurfaceType surfaceType, out Vector3 worldPos, out Quaternion worldRot)
+    {
         ComputeSpawnPose(out worldPos, out worldRot);
 
         MREnvironmentSurfaces surfaces = MREnvironmentSurfaces.Instance;
-        if (surfaces != null && surfaces.TryGetFloorPointAt(worldPos, out Vector3 floorPoint))
+        if (surfaces == null)
+            return;
+
+        if (surfaceType == PlacementSurfaceType.Ceiling)
+        {
+            if (surfaces.TryGetCeilingPointAt(worldPos, out Vector3 ceilingPoint))
+                worldPos = ceilingPoint;
+            return;
+        }
+
+        if (surfaces.TryGetFloorPointAt(worldPos, out Vector3 floorPoint))
             worldPos = floorPoint;
     }
 
@@ -836,6 +1088,19 @@ public class MRConfigurationController : MonoBehaviour
             libretroControlMap.Enable(true);
             return false;
         }
+    }
+
+    static MREnvironmentRegistry EnsureEnvironmentRegistry()
+    {
+        if (MREnvironmentRegistry.Instance != null)
+            return MREnvironmentRegistry.Instance;
+
+        var existing = FindObjectOfType<MREnvironmentRegistry>();
+        if (existing != null)
+            return existing;
+
+        var go = new GameObject("MREnvironmentRegistry");
+        return go.AddComponent<MREnvironmentRegistry>();
     }
 
     static MRLayoutRegistry EnsureRegistry()
@@ -946,6 +1211,22 @@ public class MRConfigurationController : MonoBehaviour
         false;
 #endif
 
+    bool WasSecondaryPressed()
+    {
+        bool active = ControlActive(LC.JOYPAD_Y);
+#if UNITY_EDITOR
+        if (Input.GetKey(KeyCode.Space) || Input.GetKey(KeyCode.JoystickButton3))
+            active = true;
+#else
+        if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.LTouch))
+            active = true;
+#endif
+
+        bool pressed = active && !secondaryControlWasActive;
+        secondaryControlWasActive = active;
+        return pressed;
+    }
+
     bool WasConfirmPressed()
     {
         bool active = ControlActive(LC.JOYPAD_A);
@@ -964,15 +1245,9 @@ public class MRConfigurationController : MonoBehaviour
 
     bool WasBackPressed()
     {
-        if (ControlActive(LC.JOYPAD_B) || ControlActive(LC.JOYPAD_X))
-            return true;
-#if UNITY_EDITOR
-        return Input.GetKeyDown(KeyCode.Backspace)
-            || Input.GetKeyDown(KeyCode.B)
-            || Input.GetKeyDown(KeyCode.Escape)
-            || Input.GetKeyDown(KeyCode.JoystickButton1);
-#else
-        return OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch);
-#endif
+        bool active = IsBackControlActive();
+        bool pressed = active && !backControlWasActive;
+        backControlWasActive = active;
+        return pressed;
     }
 }

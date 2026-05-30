@@ -31,6 +31,8 @@ public class MREnvironmentSurfaces : MonoBehaviour
     [SerializeField] float floorRayMaxDistanceMeters = 6.0f;
     [Tooltip("How far the frame sits off the wall surface (meters).")]
     [SerializeField] float wallSurfaceOffsetMeters = 0.015f;
+    [Tooltip("How far ceiling-mounted props sit into the ceiling surface (meters).")]
+    [SerializeField] float ceilingSurfaceOffsetMeters = 0.015f;
     [Tooltip("Max horizontal ray distance when searching for a wall mount.")]
     [SerializeField] float wallMountMaxRayDistanceMeters = 4f;
     [Tooltip("Extra Y offset from the camera/eye anchor when wall-mounting.")]
@@ -572,6 +574,61 @@ public class MREnvironmentSurfaces : MonoBehaviour
         out Vector3 floorPoint)
     {
         return TryGetFloorPointFromRay(rayOrigin, rayDirection, maxDistanceMeters, out floorPoint, out _);
+    }
+
+    /// <summary>Ceiling hit along a controller ray (MRUK ceiling filter), fallback to vertical probe at ray end.</summary>
+    public bool TryGetCeilingPointFromRay(
+        Vector3 rayOrigin,
+        Vector3 rayDirection,
+        float maxDistanceMeters,
+        out Vector3 ceilingPoint,
+        out MRUKAnchor hitAnchor)
+    {
+        hitAnchor = null;
+        ceilingPoint = default;
+
+        Vector3 direction = rayDirection;
+        if (direction.sqrMagnitude < 0.001f)
+            return false;
+        direction.Normalize();
+
+        float rayDistance = Mathf.Max(0.5f, maxDistanceMeters);
+        Ray ray = new Ray(rayOrigin, direction);
+
+        if (room != null)
+        {
+            Pose pose = room.GetBestPoseFromRaycast(
+                ray,
+                rayDistance,
+                CeilingLabelFilter,
+                out hitAnchor,
+                out _,
+                MRUK.PositioningMethod.DEFAULT);
+
+            if (hitAnchor != null)
+            {
+                ceilingPoint = pose.position;
+                return true;
+            }
+        }
+
+        Vector3 probe = rayOrigin + direction * rayDistance;
+        if (TryGetCeilingPointAt(probe, out ceilingPoint))
+        {
+            hitAnchor = room?.CeilingAnchor;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryGetCeilingPointFromRay(
+        Vector3 rayOrigin,
+        Vector3 rayDirection,
+        float maxDistanceMeters,
+        out Vector3 ceilingPoint)
+    {
+        return TryGetCeilingPointFromRay(rayOrigin, rayDirection, maxDistanceMeters, out ceilingPoint, out _);
     }
 
     public bool TryGetCeilingPointAt(Vector3 worldNear, out Vector3 ceilingPoint)

@@ -7,7 +7,7 @@ using UnityEngine;
 
 /// <summary>
 /// Runtime placement ray used to reposition placed MR objects.
-/// Current implementation supports Floor and Wall surfaces.
+/// Supports Floor, Wall, and Ceiling surfaces.
 /// </summary>
 public class MRPlacementRayController : MonoBehaviour
 {
@@ -114,8 +114,9 @@ public class MRPlacementRayController : MonoBehaviour
             return;
         }
 
-        // Game cabinets are not prefabs — floor placement defaults to yaw on world Y.
-        stickEnabled = placementSurface == PlacementSurfaceType.Floor;
+        // Game cabinets are not prefabs — floor/ceiling placement defaults to yaw on world Y.
+        stickEnabled = placementSurface == PlacementSurfaceType.Floor
+            || placementSurface == PlacementSurfaceType.Ceiling;
         rotationAxis = PlacementStickRotationAxis.WorldYaw;
         rotationSpeed = defaultStickRotationSpeed;
     }
@@ -124,7 +125,8 @@ public class MRPlacementRayController : MonoBehaviour
     {
         if (profile != null)
             return profile.allowStickRotation;
-        return placementSurface == PlacementSurfaceType.Floor;
+        return placementSurface == PlacementSurfaceType.Floor
+            || placementSurface == PlacementSurfaceType.Ceiling;
     }
 
     void Update()
@@ -188,6 +190,34 @@ public class MRPlacementRayController : MonoBehaviour
                                 worldRot, stickRotationAxis, userYawOffsetDegrees);
                         }
                     }
+                }
+                break;
+
+            case PlacementSurfaceType.Ceiling:
+                if (surfaces != null && surfaces.TryGetCeilingPointFromRay(
+                        rayOrigin, rayDir, maxDistanceMeters, out Vector3 ceilingPoint, out Meta.XR.MRUtilityKit.MRUKAnchor ceilingAnchor))
+                {
+                    MRAnchorPoseResolver.TryGetUuid(ceilingAnchor, out hitAnchorUuid);
+                    worldPos = ceilingPoint;
+                    if (allowStickRotation)
+                    {
+                        Quaternion baseYaw = Quaternion.Euler(0f, initialYawDegrees, 0f);
+                        worldRot = PlacementOrientation.ApplyStickRotationOffset(
+                            baseYaw, stickRotationAxis, userYawOffsetDegrees);
+                    }
+                    else
+                    {
+                        Vector3 look = viewerPosition - worldPos;
+                        look.y = 0f;
+                        if (look.sqrMagnitude < 0.001f)
+                            look = Vector3.forward;
+                        worldRot = PlacementOrientation.LookRotationWithFacing(look, facingAxis, Vector3.up);
+                        worldRot = PlacementOrientation.EnsureFacingViewer(
+                            worldRot, facingAxis, worldPos, viewerPosition);
+                    }
+
+                    ApplyCeilingPivotOffset(movingTarget, ref worldPos, worldRot);
+                    ok = true;
                 }
                 break;
 
@@ -337,6 +367,32 @@ public class MRPlacementRayController : MonoBehaviour
         float bottomY = PlaceOnFloorFromBoxCollider.CalculateLowerPointY(t, box);
         float pivotToBottom = t.position.y - bottomY;
         floorPoint = new Vector3(floorPoint.x, floorPoint.y + pivotToBottom, floorPoint.z);
+    }
+
+    static void ApplyCeilingPivotOffset(GameObject target, ref Vector3 ceilingPoint, Quaternion worldRotation)
+    {
+        if (target == null)
+            return;
+
+        BoxCollider box = target.GetComponentInChildren<BoxCollider>();
+        if (box == null)
+            return;
+
+        Transform t = target.transform;
+        t.SetPositionAndRotation(
+            new Vector3(ceilingPoint.x, ceilingPoint.y, ceilingPoint.z),
+            worldRotation);
+
+        float topY = CalculateUpperPointY(t, box);
+        float pivotToTop = topY - t.position.y;
+        ceilingPoint = new Vector3(ceilingPoint.x, ceilingPoint.y - pivotToTop, ceilingPoint.z);
+    }
+
+    static float CalculateUpperPointY(Transform transform, BoxCollider boxCollider)
+    {
+        Vector3 colliderCenter = transform.TransformPoint(boxCollider.center);
+        Vector3 colliderHalfSize = Vector3.Scale(boxCollider.size * 0.5f, transform.lossyScale);
+        return colliderCenter.y + colliderHalfSize.y;
     }
 
     void ApplyStickRotationInput()

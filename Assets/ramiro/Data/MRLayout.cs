@@ -199,3 +199,152 @@ public class MRLayout
         ConfigManager.WriteConsole($"[MRLayout] saved {filePath} ({Cabinets.Count} cabinets)");
     }
 }
+
+[Serializable]
+public class MREnvironmentPlacement
+{
+    public string Id;
+    public string PrefabName;
+    public MRVector3 Position;
+    public MRQuaternion Rotation;
+    public float Scale = 1f;
+    public string AnchorUuid;
+    public MRVector3 WorldPosition;
+    public MRQuaternion WorldRotation;
+    public PlacementSurfaceType SurfaceType = PlacementSurfaceType.Floor;
+    public PlacementFacingAxis FacingAxis = PlacementFacingAxis.PositiveZ;
+
+    public string DisplayLabel
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(PrefabName))
+                return PrefabName;
+            return string.IsNullOrEmpty(Id) ? "(prop)" : Id;
+        }
+    }
+}
+
+[Serializable]
+public class MREnvironmentLayout
+{
+    public int Version = 1;
+    public List<MREnvironmentPlacement> Props = new();
+
+    readonly object propsLock = new object();
+
+    public IReadOnlyList<MREnvironmentPlacement> GetProps()
+    {
+        lock (propsLock)
+            return Props.AsReadOnly();
+    }
+
+    public MREnvironmentPlacement FindById(string id)
+    {
+        if (string.IsNullOrEmpty(id))
+            return null;
+
+        lock (propsLock)
+        {
+            foreach (MREnvironmentPlacement placement in Props)
+            {
+                if (placement != null && placement.Id == id)
+                    return placement;
+            }
+        }
+
+        return null;
+    }
+
+    public MREnvironmentPlacement FindByPrefabName(string prefabName)
+    {
+        if (string.IsNullOrEmpty(prefabName))
+            return null;
+
+        lock (propsLock)
+        {
+            foreach (MREnvironmentPlacement placement in Props)
+            {
+                if (placement != null
+                    && string.Equals(placement.PrefabName, prefabName, StringComparison.OrdinalIgnoreCase))
+                    return placement;
+            }
+        }
+
+        return null;
+    }
+
+    public bool RemoveById(string id)
+    {
+        if (string.IsNullOrEmpty(id))
+            return false;
+
+        lock (propsLock)
+        {
+            for (int i = Props.Count - 1; i >= 0; i--)
+            {
+                if (Props[i]?.Id == id)
+                {
+                    Props.RemoveAt(i);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public MREnvironmentPlacement AddPlacement(MREnvironmentPlacement placement)
+    {
+        if (placement == null || string.IsNullOrEmpty(placement.PrefabName))
+            return null;
+
+        lock (propsLock)
+            Props.Add(placement);
+
+        return placement;
+    }
+
+    public static MREnvironmentLayout LoadOrCreate(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            var empty = new MREnvironmentLayout();
+            empty.Save(filePath);
+            return empty;
+        }
+
+        return LoadFromYaml(filePath);
+    }
+
+    public static MREnvironmentLayout LoadFromYaml(string filePath)
+    {
+        ConfigManager.WriteConsole($"[MREnvironmentLayout] loading {filePath}");
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
+            .Build();
+
+        string yaml = File.ReadAllText(filePath);
+        MREnvironmentLayout layout = deserializer.Deserialize<MREnvironmentLayout>(yaml);
+        if (layout == null)
+            layout = new MREnvironmentLayout();
+        if (layout.Props == null)
+            layout.Props = new List<MREnvironmentPlacement>();
+        return layout;
+    }
+
+    public void Save(string filePath)
+    {
+        var serializer = new SerializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+
+        string yaml;
+        lock (propsLock)
+            yaml = serializer.Serialize(this);
+
+        File.WriteAllText(filePath, yaml);
+        ConfigManager.WriteConsole($"[MREnvironmentLayout] saved {filePath} ({Props.Count} props)");
+    }
+}

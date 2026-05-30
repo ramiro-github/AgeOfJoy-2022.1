@@ -21,6 +21,7 @@ public class MixedRealityManager : MonoBehaviour
     MRPassthroughController passthrough;
     MRSceneTransition sceneTransition;
     MRLayoutRegistry layoutRegistry;
+    MREnvironmentRegistry environmentRegistry;
     MRMrEnvironmentLighting mrLighting;
     MREnvironmentSurfaces environmentSurfaces;
     bool transitionInProgress;
@@ -59,6 +60,10 @@ public class MixedRealityManager : MonoBehaviour
         layoutRegistry = GetComponent<MRLayoutRegistry>();
         if (layoutRegistry == null)
             layoutRegistry = gameObject.AddComponent<MRLayoutRegistry>();
+
+        environmentRegistry = GetComponent<MREnvironmentRegistry>();
+        if (environmentRegistry == null)
+            environmentRegistry = gameObject.AddComponent<MREnvironmentRegistry>();
 
         mrLighting = GetComponent<MRMrEnvironmentLighting>();
         if (mrLighting == null)
@@ -238,13 +243,17 @@ public class MixedRealityManager : MonoBehaviour
         MRConfigurationCabinetController.Instance?.ForceCloseEdit();
         ActiveRegistry()?.StopAllMrLibretroGames();
         ActiveRegistry()?.SnapshotSpawnedWorldPosesToLayout();
+        ActiveEnvironmentRegistry()?.SnapshotSpawnedWorldPosesToLayout();
         MRConfigurationCabinetController.Instance?.HideForMrExit();
         mrLighting?.Despawn();
         int hidden = ActiveRegistry()?.HideAllMrCabinetsImmediateCount() ?? 0;
-        MRTransitionLog.Log($"sync hide done mrCabinetsHidden={hidden}");
+        int hiddenEnv = ActiveEnvironmentRegistry()?.HideAllImmediateCount() ?? 0;
+        MRTransitionLog.Log($"sync hide done mrCabinetsHidden={hidden} envPropsHidden={hiddenEnv}");
     }
 
     MRLayoutRegistry ActiveRegistry() => MRLayoutRegistry.Instance ?? layoutRegistry;
+
+    MREnvironmentRegistry ActiveEnvironmentRegistry() => MREnvironmentRegistry.Instance ?? environmentRegistry;
 
     public void EnterMREdit()
     {
@@ -360,6 +369,7 @@ public class MixedRealityManager : MonoBehaviour
 
         mrLighting?.Spawn(MRSpaceOrigin);
         ActiveRegistry()?.SpawnAll(MRSpaceOrigin);
+        ActiveEnvironmentRegistry()?.SpawnAll(MRSpaceOrigin);
         MRConfigurationCabinetController.Instance?.SpawnAtMrOrigin();
 
         yield return null;
@@ -420,6 +430,7 @@ public class MixedRealityManager : MonoBehaviour
         SetMode(ExperienceMode.MR);
         mrLighting?.Spawn(MRSpaceOrigin);
         ActiveRegistry()?.SpawnAll(MRSpaceOrigin);
+        ActiveEnvironmentRegistry()?.SpawnAll(MRSpaceOrigin);
         MRConfigurationCabinetController.Instance?.SpawnAtMrOrigin();
 
         yield return null;
@@ -470,9 +481,12 @@ public class MixedRealityManager : MonoBehaviour
         PayphoneHandsetGrab.RefreshGrabbedHandVisibility(scenePortal);
 
         MRLayoutRegistry registry = ActiveRegistry();
+        MREnvironmentRegistry envRegistry = ActiveEnvironmentRegistry();
         MRVrSystemsGate.StopActiveLibretroGames();
         if (registry != null)
             yield return registry.DespawnAllAsync(stopLibretroFirst: true);
+        if (envRegistry != null)
+            yield return envRegistry.DespawnAllAsync();
         if (!IsTransitionCurrent(generation))
             yield break;
 
@@ -565,11 +579,14 @@ public class MixedRealityManager : MonoBehaviour
         MRTransitionLog.LogManagerState("EnterVRCoroutine-after-resume");
 
         MRLayoutRegistry registry = ActiveRegistry();
+        MREnvironmentRegistry envRegistry = ActiveEnvironmentRegistry();
         MRVrSystemsGate.StopActiveLibretroGames();
         MRTransitionLog.LogStep("EnterVRCoroutine", "after StopActiveLibretroGames");
         MRTransitionLog.Log($"DespawnAllAsync registry={(registry != null ? registry.name : "null")}");
         if (registry != null)
             yield return registry.DespawnAllAsync(stopLibretroFirst: true);
+        if (envRegistry != null)
+            yield return envRegistry.DespawnAllAsync();
         if (!IsTransitionCurrent(generation))
         {
             MRTransitionLog.LogWarning($"EnterVRCoroutine aborted after DespawnAllAsync generation={generation}");
