@@ -30,6 +30,7 @@ public static class MRVrSystemsGate
         ConfigManager.WriteConsole($"{LogPrefix} ResumeForVR (VR scenes reload separately)");
         StopActiveLibretroGames();
         EnableVrCabinetControllers();
+        EnsureHandModelsVisible();
         ResumePlayerLocomotion();
         ResetLegacyPassthroughState();
         MRTransitionLog.Log("MRVrSystemsGate.ResumeForVR done");

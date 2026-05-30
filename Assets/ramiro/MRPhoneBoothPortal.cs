@@ -4,17 +4,18 @@ This program is free software: you can redistribute it and/or modify it under th
 
 using System.Collections;
 using UnityEngine;
-using UnityEngine.XR.Interaction.Toolkit;
 
 /// <summary>
-/// Phone booth portal on PF_Payphone — interior volume + handset grab triggers immersive travel.
+/// Phone booth portal on PF_Payphone — handset grab triggers immersive VR↔MR travel.
 /// </summary>
 public class MRPhoneBoothPortal : MonoBehaviour
 {
     const string LogPrefix = "[MRPhoneBoothPortal]";
     const string BoothObjectName = "PF_Payphone";
-    const string HandsetObjectName = "PF_Grabbable_Phone";
+    const string ExteriorSceneName = "IntroGalleryExterior";
     const float DefaultTravelDurationSeconds = 3.5f;
+
+    static MRPhoneBoothPortal activeTraveler;
 
     [SerializeField] float travelDurationSeconds = DefaultTravelDurationSeconds;
     [SerializeField] BoxCollider interiorTrigger;
@@ -25,8 +26,9 @@ public class MRPhoneBoothPortal : MonoBehaviour
     bool travelInProgress;
     bool handsetGrabbed;
     PhoneBoothTravelState pendingTravelState;
-    XRGrabInteractable handsetGrab;
     Coroutine travelCoroutine;
+
+    public static MRPhoneBoothPortal ActiveTraveler => activeTraveler;
 
     public bool IsTravelerInstance
     {
@@ -40,7 +42,6 @@ public class MRPhoneBoothPortal : MonoBehaviour
     void Awake()
     {
         EnsureInteriorTrigger();
-        BindHandsetGrab();
         if (travelAudioSource == null)
             travelAudioSource = GetComponentInChildren<AudioSource>();
     }
@@ -48,11 +49,6 @@ public class MRPhoneBoothPortal : MonoBehaviour
     void OnEnable()
     {
         SceneManagerHook.EnsureRegistered();
-    }
-
-    void OnDestroy()
-    {
-        UnbindHandsetGrab();
     }
 
     public PhoneBoothTravelState CaptureTravelState()
@@ -74,6 +70,14 @@ public class MRPhoneBoothPortal : MonoBehaviour
         MRTransitionLog.Log($"{LogPrefix} applied travel state inside={PlayerInside} traveler={isTravelerInstance}");
     }
 
+    /// <summary>Called by PayphoneHandsetGrab when the handset is grabbed.</summary>
+    public void NotifyHandsetGrabbedForTravel()
+    {
+        handsetGrabbed = true;
+        ConfigManager.WriteConsole($"{LogPrefix} handset grabbed — trying travel mode={MixedRealityManager.Instance?.CurrentMode}");
+        TryStartTravelFromHandset();
+    }
+
     public void BeginTravelToMR()
     {
         if (travelInProgress || MixedRealityManager.Instance == null)
@@ -82,9 +86,9 @@ public class MRPhoneBoothPortal : MonoBehaviour
         if (MixedRealityManager.Instance.CurrentMode != ExperienceMode.VR)
             return;
 
-        if (!PlayerInside)
+        if (!CanStartTravel())
         {
-            ConfigManager.WriteConsoleWarning($"{LogPrefix} BeginTravelToMR ignored — player not inside");
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} BeginTravelToMR ignored — player not at booth");
             return;
         }
 
@@ -108,15 +112,12 @@ public class MRPhoneBoothPortal : MonoBehaviour
         if (travelInProgress || MixedRealityManager.Instance == null)
             return;
 
-        if (!MixedRealityManager.IsVrExperience && MixedRealityManager.Instance.CurrentMode != ExperienceMode.MR_EDIT)
-        {
-            if (MixedRealityManager.Instance.CurrentMode != ExperienceMode.MR)
-                return;
-        }
+        if (!MixedRealityManager.Instance.IsMrEnvironmentActive())
+            return;
 
-        if (!PlayerInside)
+        if (!CanStartTravel())
         {
-            ConfigManager.WriteConsoleWarning($"{LogPrefix} BeginTravelToVR ignored — player not inside");
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} BeginTravelToVR ignored — player not at booth");
             return;
         }
 
@@ -142,10 +143,111 @@ public class MRPhoneBoothPortal : MonoBehaviour
         return state;
     }
 
+    public void ApplyMrVisibility()
+    {
+        MRPhoneBoothSettings.EnsureLoaded();
+        SetVisible(MRPhoneBoothSettings.Visible);
+    }
+
     public void SetVisible(bool visible)
     {
         gameObject.SetActive(visible);
     }
+
+    /// <summary>Restore every handset on this booth after immersive travel.</summary>
+    public void NotifyHandsetsTravelComplete()
+    {
+        PayphoneHandsetGrab[] grabs = FindObjectsOfType<PayphoneHandsetGrab>();
+        foreach (PayphoneHandsetGrab grab in grabs)
+        {
+            if (grab == null || grab.BelongsToTravelerBooth())
+                continue;
+
+            grab.NotifyBoothTravelComplete();
+        }
+    }
+
+    public void PlaceOnMrFloor(MREnvironmentSurfaces surfaces, Transform player)
+    {
+        if (MRPhoneBoothSettings.TryGetMrPose(out Vector3 savedPos, out Quaternion savedRot))
+        {
+            transform.SetPositionAndRotation(savedPos, savedRot);
+            ConfigManager.WriteConsole($"{LogPrefix} placed booth from saved MR pose");
+            return;
+        }
+
+        Vector3 near = player != null ? player.position : transform.position;
+        Vector3 floorPoint = near;
+        if (surfaces != null)
+            surfaces.TryGetFloorPointAt(near, out floorPoint);
+
+        float bottomY = ComputeLowestWorldY();
+        transform.position += Vector3.up * (floorPoint.y - bottomY);
+
+        if (player != null)
+        {
+            Vector3 toPlayer = player.position - transform.position;
+            toPlayer.y = 0f;
+            if (toPlayer.sqrMagnitude > 0.04f)
+                transform.rotation = Quaternion.LookRotation(toPlayer.normalized, Vector3.up);
+        }
+
+        MRPhoneBoothSettings.SaveMrPose(transform.position, transform.rotation);
+        ConfigManager.WriteConsole($"{LogPrefix} placed booth on MR floor at {transform.position}");
+    }
+
+    public static void AdoptAsTraveler(MRPhoneBoothPortal portal, Transform ddolParent)
+    {
+        if (portal == null || ddolParent == null)
+            return;
+
+        if (activeTraveler != null && activeTraveler != portal)
+            DestroyTravelerInstance();
+
+        PayphoneHandsetGrab.AttachLooseHandsetsToBooth(portal);
+
+        activeTraveler = portal;
+        portal.isTravelerInstance = true;
+        portal.transform.SetParent(ddolParent, worldPositionStays: true);
+        ConfigManager.WriteConsole($"{LogPrefix} adopted traveler booth '{portal.name}'");
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "AdoptAsTraveler");
+    }
+
+    public static void DestroyTravelerInstance(bool restoreHiddenHands = true)
+    {
+        if (restoreHiddenHands)
+            PayphoneHandsetGrab.ReleaseAllHiddenHandVisuals();
+
+        PayphoneHandsetGrab.DestroyDetachedInstances();
+
+        if (activeTraveler == null)
+            return;
+
+        GameObject go = activeTraveler.gameObject;
+        activeTraveler = null;
+        if (go != null)
+            Destroy(go);
+
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "DestroyTravelerInstance");
+    }
+
+    public static MRPhoneBoothPortal FindSceneBoothPortal()
+    {
+        MRPhoneBoothPortal[] portals = FindObjectsOfType<MRPhoneBoothPortal>(includeInactive: true);
+        foreach (MRPhoneBoothPortal portal in portals)
+        {
+            if (portal.isTravelerInstance)
+                continue;
+
+            if (portal.gameObject.scene.name == ExteriorSceneName)
+                return portal;
+        }
+
+        GameObject booth = GameObject.Find(BoothObjectName);
+        return booth != null ? EnsureOn(booth) : null;
+    }
+
+    bool CanStartTravel() => PlayerInside || handsetGrabbed;
 
     void EnsureInteriorTrigger()
     {
@@ -166,56 +268,32 @@ public class MRPhoneBoothPortal : MonoBehaviour
         relay.Portal = this;
     }
 
-    void BindHandsetGrab()
+    void TryStartTravelFromHandset()
     {
-        Transform handsetRoot = transform.Find(HandsetObjectName);
-        if (handsetRoot == null)
-            handsetGrab = GetComponentInChildren<XRGrabInteractable>(true);
-        else
-            handsetGrab = handsetRoot.GetComponentInChildren<XRGrabInteractable>(true);
-
-        if (handsetGrab == null)
+        if (travelInProgress)
         {
-            ConfigManager.WriteConsoleWarning($"{LogPrefix} handset XRGrabInteractable not found on {name}");
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} travel ignored — already in progress");
             return;
         }
 
-        handsetGrab.selectEntered.AddListener(OnHandsetGrabbed);
-        handsetGrab.selectExited.AddListener(OnHandsetReleased);
-    }
-
-    void UnbindHandsetGrab()
-    {
-        if (handsetGrab == null)
+        if (!CanStartTravel())
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} travel ignored — player not at booth");
             return;
-
-        handsetGrab.selectEntered.RemoveListener(OnHandsetGrabbed);
-        handsetGrab.selectExited.RemoveListener(OnHandsetReleased);
-    }
-
-    void OnHandsetGrabbed(SelectEnterEventArgs _)
-    {
-        handsetGrabbed = true;
-        TryStartTravelFromHandset();
-    }
-
-    void OnHandsetReleased(SelectExitEventArgs _)
-    {
-        handsetGrabbed = false;
-    }
-
-    void TryStartTravelFromHandset()
-    {
-        if (!PlayerInside || travelInProgress)
-            return;
+        }
 
         if (MixedRealityManager.Instance == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} travel ignored — MixedRealityManager missing");
             return;
+        }
 
         if (MixedRealityManager.Instance.CurrentMode == ExperienceMode.VR)
             BeginTravelToMR();
         else if (MixedRealityManager.Instance.IsMrEnvironmentActive())
             BeginTravelToVR();
+        else
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} travel ignored — mode={MixedRealityManager.Instance.CurrentMode}");
     }
 
     internal void NotifyPlayerEntered()
@@ -246,8 +324,21 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         travelInProgress = false;
         travelCoroutine = null;
+        handsetGrabbed = false;
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect end");
         onComplete?.Invoke();
+    }
+
+    float ComputeLowestWorldY()
+    {
+        float minY = transform.position.y;
+        foreach (Renderer renderer in GetComponentsInChildren<Renderer>(includeInactive: true))
+            minY = Mathf.Min(minY, renderer.bounds.min.y);
+
+        foreach (Collider collider in GetComponentsInChildren<Collider>(includeInactive: true))
+            minY = Mathf.Min(minY, collider.bounds.min.y);
+
+        return minY;
     }
 
     static Transform FindPlayerTransform()
@@ -288,7 +379,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         static void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
         {
-            if (scene.name != "IntroGalleryExterior")
+            if (scene.name != ExteriorSceneName)
                 return;
 
             foreach (GameObject root in scene.GetRootGameObjects())

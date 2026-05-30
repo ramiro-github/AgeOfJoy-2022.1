@@ -141,18 +141,63 @@ public class MixedRealityManager : MonoBehaviour
         BeginTransition(EnterMRCoroutine());
     }
 
-    /// <summary>Immersive VR→MR via phone booth (not implemented yet — use EnterMR / toggle).</summary>
+    /// <summary>Immersive VR→MR via phone booth — player stays inside the rescued booth.</summary>
     public void EnterMRFromPhoneBooth(MRPhoneBoothPortal portal)
     {
-        ConfigManager.WriteConsoleWarning($"{LogPrefix} EnterMRFromPhoneBooth not implemented — use toggle or EnterMR()");
-        MRTransitionLog.LogWarning("EnterMRFromPhoneBooth not implemented");
+        MRTransitionLog.LogStep("EnterMRFromPhoneBooth", "requested");
+        MRTransitionLog.LogManagerState("EnterMRFromPhoneBooth-begin");
+
+        if (portal == null)
+        {
+            MRTransitionLog.LogWarning("EnterMRFromPhoneBooth ignored — portal null");
+            return;
+        }
+
+        if (CurrentMode == ExperienceMode.MR || CurrentMode == ExperienceMode.MR_EDIT)
+        {
+            MRTransitionLog.LogWarning("EnterMRFromPhoneBooth ignored — already in MR mode");
+            return;
+        }
+
+        if (transitionInProgress)
+        {
+            MRTransitionLog.LogWarning("EnterMRFromPhoneBooth ignored — transition already in progress");
+            return;
+        }
+
+        MRTransitionLog.EnsureSession("EnterMRFromPhoneBooth");
+        BeginTransition(EnterMRFromPhoneBoothCoroutine(portal));
     }
 
-    /// <summary>Immersive MR→VR via phone booth (not implemented yet — use EnterVR / toggle).</summary>
+    /// <summary>Immersive MR→VR via phone booth — scene booth pose is authoritative.</summary>
     public void EnterVRFromPhoneBooth(MRPhoneBoothPortal portal)
     {
-        ConfigManager.WriteConsoleWarning($"{LogPrefix} EnterVRFromPhoneBooth not implemented — use toggle or EnterVR()");
-        MRTransitionLog.LogWarning("EnterVRFromPhoneBooth not implemented");
+        MRTransitionLog.LogStep("EnterVRFromPhoneBooth", "requested");
+        MRTransitionLog.LogManagerState("EnterVRFromPhoneBooth-begin");
+
+        if (portal == null)
+        {
+            MRTransitionLog.LogWarning("EnterVRFromPhoneBooth ignored — portal null");
+            return;
+        }
+
+        if (!IsMrEnvironmentActive())
+        {
+            MRTransitionLog.LogWarning("EnterVRFromPhoneBooth ignored — MR environment not active");
+            return;
+        }
+
+        if (transitionInProgress)
+        {
+            MRTransitionLog.LogWarning("EnterVRFromPhoneBooth ignored — transition already in progress");
+            return;
+        }
+
+        MRTransitionLog.LogStep("EnterVRFromPhoneBooth", "immediate passthrough off");
+        passthrough.DisablePassthrough(playFadeOut: false);
+        ResetLegacyPassthroughFlags();
+        BeginMrExitImmediateSync();
+        BeginTransition(EnterVRFromPhoneBoothCoroutine(portal));
     }
 
     public void EnterVR()
@@ -325,6 +370,129 @@ public class MixedRealityManager : MonoBehaviour
         MRTransitionLog.LogManagerState("EnterMRCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterMR done");
         MRTransitionLog.LogStep("EnterMRCoroutine", "DONE");
+    }
+
+    IEnumerator EnterMRFromPhoneBoothCoroutine(MRPhoneBoothPortal portal)
+    {
+        int generation = transitionGeneration;
+        PhoneBoothTravelState travelState = portal.ConsumePendingTravelState();
+        MRTransitionLog.LogStep("EnterMRFromPhoneBoothCoroutine", $"start generation={generation}");
+        ConfigManager.WriteConsole($"{LogPrefix} EnterMRFromPhoneBooth coroutine");
+
+        MRScenePermissions.Reset();
+        yield return MRScenePermissions.EnsureGranted();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        MRRoomInfoUI.Instance?.RefreshContent();
+        MRVrSystemsGate.SuspendForMR();
+
+        yield return passthrough.EnablePassthroughWhenReady();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        if (!passthrough.PassthroughSystemReady)
+        {
+            MRTransitionLog.LogError("EnterMRFromPhoneBooth aborted — passthrough system not ready");
+            yield break;
+        }
+
+        MRPhoneBoothPortal.AdoptAsTraveler(portal, transform);
+        yield return sceneTransition.UnloadVrScenes();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        DestroyMRSpaceOrigin();
+        EnsureMRSpaceOrigin();
+
+        Transform player = FindPlayerTransform();
+        if (environmentSurfaces != null)
+            yield return environmentSurfaces.ProbeWhenReady(player);
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        if (environmentSurfaces != null && MRSpaceOrigin != null)
+            environmentSurfaces.AlignOriginToFloor(MRSpaceOrigin, player);
+
+        SetMode(ExperienceMode.MR);
+        mrLighting?.Spawn(MRSpaceOrigin);
+        ActiveRegistry()?.SpawnAll(MRSpaceOrigin);
+        MRConfigurationCabinetController.Instance?.SpawnAtMrOrigin();
+
+        yield return null;
+        ActiveRegistry()?.EnsureAttractPlaybackOnSpawned();
+        yield return RefreshMrPosesWhenReady(generation, player);
+
+        portal.PlaceOnMrFloor(environmentSurfaces, player);
+        ApplyPhoneBoothTravelState(portal, travelState);
+        portal.ApplyMrVisibility();
+        portal.NotifyHandsetsTravelComplete();
+
+        MRTransitionLog.LogManagerState("EnterMRFromPhoneBoothCoroutine-final");
+        ConfigManager.WriteConsole($"{LogPrefix} EnterMRFromPhoneBooth done");
+        MRTransitionLog.LogStep("EnterMRFromPhoneBoothCoroutine", "DONE");
+    }
+
+    IEnumerator EnterVRFromPhoneBoothCoroutine(MRPhoneBoothPortal travelerPortal)
+    {
+        int generation = transitionGeneration;
+        PhoneBoothTravelState travelState = travelerPortal != null
+            ? travelerPortal.ConsumePendingTravelState()
+            : null;
+        MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine", $"start generation={generation}");
+        ConfigManager.WriteConsole($"{LogPrefix} EnterVRFromPhoneBooth coroutine");
+
+        if (CurrentMode == ExperienceMode.MR_EDIT)
+            SetMode(ExperienceMode.MR);
+
+        if (travelerPortal != null && travelerPortal.IsTravelerInstance)
+            MRPhoneBoothSettings.SaveMrPose(travelerPortal.transform.position, travelerPortal.transform.rotation);
+
+        PayphoneHandsetGrab.VrReturnHandsetPlan handsetPlan =
+            PayphoneHandsetGrab.CaptureVrReturnPlan(travelerPortal, travelState);
+
+        yield return sceneTransition.ReloadVrScenes();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        MRPhoneBoothPortal scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+        ApplyPhoneBoothTravelState(scenePortal, travelState);
+        PayphoneHandsetGrab.FinalizeForVrSceneReturn(travelerPortal, scenePortal, handsetPlan);
+
+        passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
+        ResetLegacyPassthroughFlags();
+        SetMode(ExperienceMode.VR);
+        MRVrSystemsGate.ResumeForVR();
+        PayphoneHandsetGrab.RefreshGrabbedHandVisibility(scenePortal);
+
+        MRLayoutRegistry registry = ActiveRegistry();
+        MRVrSystemsGate.StopActiveLibretroGames();
+        if (registry != null)
+            yield return registry.DespawnAllAsync(stopLibretroFirst: true);
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        MRVrSystemsGate.StopActiveLibretroGames();
+        environmentSurfaces?.ClearMrukScene();
+        MRRoomInfoUI.Instance?.Hide();
+        DestroyMRSpaceOrigin();
+        MRConfigurationCabinetController.Instance?.ReleaseForVrTransition();
+        yield return null;
+
+        passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
+        ResetLegacyPassthroughFlags();
+
+        MRTransitionLog.LogManagerState("EnterVRFromPhoneBoothCoroutine-final");
+        ConfigManager.WriteConsole($"{LogPrefix} EnterVRFromPhoneBooth done");
+        MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine", "DONE");
+    }
+
+    static void ApplyPhoneBoothTravelState(MRPhoneBoothPortal portal, PhoneBoothTravelState state)
+    {
+        if (portal == null || state == null)
+            return;
+
+        portal.ApplyTravelState(state);
     }
 
     IEnumerator RefreshMrPosesWhenReady(int generation, Transform player)

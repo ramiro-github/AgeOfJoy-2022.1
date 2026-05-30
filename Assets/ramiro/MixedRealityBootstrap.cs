@@ -8,22 +8,54 @@ using UnityEngine.SceneManagement;
 public static class MixedRealityBootstrap
 {
     const string RootName = "MixedRealitySystem";
+
     static bool ShouldInstallForScene(string sceneName) =>
-        sceneName == "FixedScene" || sceneName == "TestMRmanager";
+        sceneName == "FixedScene"
+        || sceneName == "TestMRmanager"
+        || sceneName == "IntroGalleryExterior";
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Install()
     {
+        TryInstallForLoadedScenes();
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    static void RegisterSceneHook()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        TryInstallForLoadedScenes();
+    }
+
+    static void TryInstallForLoadedScenes()
+    {
         if (MixedRealityManager.Instance != null)
             return;
 
-        Scene active = SceneManager.GetActiveScene();
-        if (!ShouldInstallForScene(active.name))
+        for (int i = 0; i < SceneManager.sceneCount; i++)
+        {
+            if (!ShouldInstallForScene(SceneManager.GetSceneAt(i).name))
+                continue;
+
+            InstallSystem();
+            return;
+        }
+    }
+
+    static void InstallSystem()
+    {
+        if (MixedRealityManager.Instance != null)
             return;
 
         var root = new GameObject(RootName);
         root.AddComponent<MixedRealityManager>();
 
+        Scene active = SceneManager.GetActiveScene();
         if (active.name == "TestMRmanager")
             root.AddComponent<MRTestGameCabinetSpawn>();
 
