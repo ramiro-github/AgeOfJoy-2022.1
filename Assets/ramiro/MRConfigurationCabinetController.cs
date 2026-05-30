@@ -287,6 +287,7 @@ public class MRConfigurationCabinetController : MonoBehaviour
         if (cabinetInstance != null)
         {
             cabinetInstance.SetActive(true);
+            EnsureCoinSlotBound();
             ApplyPoseToExistingCabinet();
             RequestInitialPlacementRayWhenReady();
             return;
@@ -678,6 +679,22 @@ public class MRConfigurationCabinetController : MonoBehaviour
 
         coinSlot.OnInsertCoin?.AddListener(onCoinInsertedHandler);
         boundCoinSlot = coinSlot;
+        MRTransitionLog.Log("config cabinet coin slot bound");
+    }
+
+    /// <summary>Re-bind coin listener after MR re-entry (HideForMrExit unbinds).</summary>
+    void EnsureCoinSlotBound()
+    {
+        if (cabinetInstance == null)
+            return;
+
+        if (crtController == null)
+        {
+            PrepareCabinetInstance(cabinetInstance);
+            return;
+        }
+
+        BindCoinInsert(FindCoinSlot(cabinetInstance));
     }
 
     void UnbindCoinInsert()
@@ -700,6 +717,7 @@ public class MRConfigurationCabinetController : MonoBehaviour
         if (placementRay != null && placementRay.IsActive)
             return;
 
+        MRTransitionLog.Log("config cabinet coin inserted — opening edit");
         OpenEdit();
     }
 
