@@ -121,12 +121,17 @@ public class MRConfigurationController : MonoBehaviour
 
     public void EndSession()
     {
+        if (!sessionActive && pendingAddRoot == null && !placementMoveActive && !placementAddActive)
+            return;
+
         sessionActive = false;
         confirmControlWasActive = false;
         placementMoveActive = false;
         placementAddActive = false;
         movingPlacementId = null;
         CancelPendingAdd(destroyCabinet: true);
+        if (placementRay != null && placementRay.IsActive)
+            placementRay.CancelActive();
         currentScreen = Screen.Idle;
         cleanActionMap();
         ActivateShader(false);

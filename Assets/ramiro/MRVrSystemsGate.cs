@@ -26,23 +26,32 @@ public static class MRVrSystemsGate
 
     public static void ResumeForVR()
     {
+        MRTransitionLog.LogStep("MRVrSystemsGate.ResumeForVR");
         ConfigManager.WriteConsole($"{LogPrefix} ResumeForVR (VR scenes reload separately)");
+        StopActiveLibretroGames();
+        EnableVrCabinetControllers();
         ResumePlayerLocomotion();
         ResetLegacyPassthroughState();
+        MRTransitionLog.Log("MRVrSystemsGate.ResumeForVR done");
     }
 
-    static void StopActiveLibretroGames()
+    public static void StopActiveLibretroGames()
     {
         if (!LibretroMameCore.GameLoaded)
+        {
+            MRTransitionLog.Log("StopActiveLibretroGames — GameLoaded=false skip");
             return;
+        }
 
         var screens = Object.FindObjectsOfType<LibretroScreenController>(true);
+        MRTransitionLog.Log($"StopActiveLibretroGames screens={screens.Length}");
         foreach (LibretroScreenController screen in screens)
         {
             if (screen == null)
                 continue;
             if (LibretroMameCore.isRunning(screen.ScreenName, screen.GameFile))
             {
+                MRTransitionLog.Log($"StopActiveLibretroGames End on {screen.name}");
                 ConfigManager.WriteConsole($"{LogPrefix} ending LibRetro on {screen.name}");
                 LibretroMameCore.End(screen.ScreenName, screen.GameFile);
             }
@@ -55,6 +64,9 @@ public static class MRVrSystemsGate
         foreach (CabinetReplace replace in replacements)
         {
             if (replace == null)
+                continue;
+
+            if (replace.game != null && replace.game.Room == MixedRealityManager.MrRoomName)
                 continue;
 
             ConfigManager.WriteConsole($"{LogPrefix} removing deployed cabinet {replace.name}");
@@ -75,6 +87,19 @@ public static class MRVrSystemsGate
             controller.StopAllCoroutines();
             controller.enabled = false;
             ConfigManager.WriteConsole($"{LogPrefix} disabled CabinetsController on {controller.gameObject.name} (room={controller.Room})");
+        }
+    }
+
+    static void EnableVrCabinetControllers()
+    {
+        var controllers = Object.FindObjectsOfType<CabinetsController>(true);
+        MRTransitionLog.Log($"EnableVrCabinetControllers count={controllers.Length}");
+        foreach (CabinetsController controller in controllers)
+        {
+            if (controller == null || controller.enabled)
+                continue;
+            controller.enabled = true;
+            ConfigManager.WriteConsole($"{LogPrefix} re-enabled CabinetsController on {controller.gameObject.name} (room={controller.Room})");
         }
     }
 

@@ -54,6 +54,9 @@ public class MRCabinetPlacement
     public float Scale = 1f;
     /// <summary>OVRAnchor UUID when Position/Rotation are local to that MRUK anchor (layout v3+).</summary>
     public string AnchorUuid;
+    /// <summary>Last known world pose — used when anchor UUID cannot be resolved on MR re-entry.</summary>
+    public MRVector3 WorldPosition;
+    public MRQuaternion WorldRotation;
     public PlacementSurfaceType SurfaceType = PlacementSurfaceType.Floor;
     /// <summary>Local axis that points toward the viewer when placed (NegativeZ = Unity default mesh with Z as back).</summary>
     public PlacementFacingAxis FacingAxis = PlacementFacingAxis.PositiveZ;

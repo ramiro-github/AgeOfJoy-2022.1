@@ -3,6 +3,7 @@ This program is free software: you can redistribute it and/or modify it under th
 */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -56,7 +57,67 @@ public class MRLayoutRegistry : MonoBehaviour
             return;
 
         layout = MRLayout.LoadOrCreate(LayoutFilePath);
+        MigrateLayoutWorldFallback(layout, LayoutFilePath);
         ConfigManager.WriteConsole($"{LogPrefix} layout loaded ({layout.Cabinets.Count} entries)");
+    }
+
+    /// <summary>Cache live world transforms before MR→VR hide/destroy (anchor UUID may not resolve on next entry).</summary>
+    public void SnapshotSpawnedWorldPosesToLayout()
+    {
+        EnsureLayoutLoaded();
+        if (layout == null || spawnedById.Count == 0)
+            return;
+
+        bool changed = false;
+        foreach (KeyValuePair<string, GameObject> entry in spawnedById)
+        {
+            if (entry.Value == null)
+                continue;
+
+            MRCabinetPlacement placement = layout.FindById(entry.Key);
+            if (placement == null)
+                continue;
+
+            Vector3 displayPos = entry.Value.transform.position;
+            Quaternion rot = entry.Value.transform.rotation;
+            Vector3 storagePos = WorldPositionForStorage(placement.SurfaceType, displayPos);
+            Guid anchorUuid = Guid.Empty;
+            if (!string.IsNullOrEmpty(placement.AnchorUuid))
+                Guid.TryParse(placement.AnchorUuid, out anchorUuid);
+
+            WriteStoredPose(placement, placement.SurfaceType, storagePos, rot, anchorUuid);
+            changed = true;
+            MRTransitionLog.Log(
+                $"SnapshotWorldPose {placement.DisplayLabel} display={displayPos} storage={storagePos} anchor={placement.AnchorUuid ?? "none"}");
+        }
+
+        if (changed)
+        {
+            layout.Save(LayoutFilePath);
+            MRTransitionLog.Log($"SnapshotSpawnedWorldPosesToLayout count={spawnedById.Count}");
+        }
+    }
+
+    static void MigrateLayoutWorldFallback(MRLayout loaded, string layoutFilePath)
+    {
+        if (loaded == null)
+            return;
+
+        bool changed = false;
+        foreach (MRCabinetPlacement placement in loaded.GetCabinets())
+        {
+            if (placement?.WorldPosition != null || placement?.Position == null)
+                continue;
+            if (!string.IsNullOrEmpty(placement.AnchorUuid))
+                continue;
+
+            placement.WorldPosition = placement.Position;
+            placement.WorldRotation = placement.Rotation;
+            changed = true;
+        }
+
+        if (changed)
+            loaded.Save(layoutFilePath);
     }
 
     /// <summary>Spawn all entries from mr-layout.yaml under MRSpaceOrigin.</summary>
@@ -92,16 +153,127 @@ public class MRLayoutRegistry : MonoBehaviour
         ConfigManager.WriteConsole($"{LogPrefix} SpawnAll done ({spawnedById.Count} cabinets)");
     }
 
-    public void DespawnAll()
+    public void DespawnAll(bool stopLibretroFirst = true)
     {
-        foreach (GameObject root in spawnedById.Values)
+        foreach (GameObject root in CollectAllMrCabinetRoots())
         {
-            if (root != null)
+            if (root == null)
+                continue;
+
+            if (stopLibretroFirst)
+                StopLibretroOnCabinet(root);
+
+            var replace = root.GetComponent<CabinetReplace>();
+            if (replace != null)
+                Destroy(replace.gameObject);
+            else
                 Destroy(root);
         }
 
         spawnedById.Clear();
-        ConfigManager.WriteConsole($"{LogPrefix} DespawnAll done");
+        ConfigManager.WriteConsole($"{LogPrefix} DespawnAll done (stopLibretro={stopLibretroFirst})");
+    }
+
+    /// <summary>Instant hide for every MR cabinet (registered, transient, validation).</summary>
+    public void HideAllMrCabinetsImmediate()
+    {
+        int hidden = HideAllMrCabinetsImmediateCount();
+        if (hidden > 0)
+            ConfigManager.WriteConsole($"{LogPrefix} hid {hidden} MR cabinet(s)");
+    }
+
+    public int HideAllMrCabinetsImmediateCount()
+    {
+        var roots = CollectAllMrCabinetRoots();
+        int hidden = 0;
+        foreach (GameObject root in roots)
+        {
+            if (root == null || !root.activeSelf)
+                continue;
+            root.SetActive(false);
+            hidden++;
+        }
+
+        MRTransitionLog.Log($"HideAllMrCabinetsImmediate roots={roots.Count} hidden={hidden} spawnedById={spawnedById.Count}");
+        return hidden;
+    }
+
+    /// <summary>Hide then destroy MR cabinets over several frames so Libretro OnDestroy does not block VR reload.</summary>
+    public IEnumerator DespawnAllAsync(bool stopLibretroFirst = false)
+    {
+        var roots = CollectAllMrCabinetRoots();
+        MRTransitionLog.LogStep("DespawnAllAsync", $"begin roots={roots.Count} stopLibretro={stopLibretroFirst}");
+        foreach (GameObject root in roots)
+        {
+            if (root != null)
+                root.SetActive(false);
+        }
+
+        yield return null;
+        yield return null;
+        MRTransitionLog.LogStep("DespawnAllAsync", "after 2 hide frames");
+
+        int destroyed = 0;
+        foreach (GameObject root in roots)
+        {
+            if (root == null)
+                continue;
+
+            MRTransitionLog.Log($"DespawnAllAsync destroying {root.name}");
+            if (stopLibretroFirst)
+                StopLibretroOnCabinet(root);
+
+            var replace = root.GetComponent<CabinetReplace>();
+            if (replace != null)
+                Destroy(replace.gameObject);
+            else
+                Destroy(root);
+
+            destroyed++;
+            yield return null;
+        }
+
+        spawnedById.Clear();
+        MRTransitionLog.LogStep("DespawnAllAsync", $"done destroyed={destroyed}");
+        ConfigManager.WriteConsole($"{LogPrefix} DespawnAllAsync done ({roots.Count} cabinets)");
+    }
+
+    List<GameObject> CollectAllMrCabinetRoots()
+    {
+        var roots = new HashSet<GameObject>();
+
+        foreach (GameObject root in spawnedById.Values)
+        {
+            if (root != null)
+                roots.Add(root);
+        }
+
+        foreach (MRPlacedCabinet placed in FindObjectsOfType<MRPlacedCabinet>(true))
+        {
+            if (placed == null)
+                continue;
+            roots.Add(ResolveCabinetRoot(placed.gameObject));
+        }
+
+        foreach (CabinetReplace replace in FindObjectsOfType<CabinetReplace>(true))
+        {
+            if (replace == null || replace.game == null)
+                continue;
+            if (replace.game.Room != MixedRealityManager.MrRoomName)
+                continue;
+            roots.Add(replace.gameObject);
+        }
+
+        return roots.ToList();
+    }
+
+    static GameObject ResolveCabinetRoot(GameObject go)
+    {
+        if (go == null)
+            return null;
+
+        CabinetReplace replace = go.GetComponentInParent<CabinetReplace>();
+        return replace != null ? replace.gameObject : go;
     }
 
     public bool RemovePlacement(string placementId)
@@ -414,7 +586,13 @@ public class MRLayoutRegistry : MonoBehaviour
             return false;
         }
 
-        ReadWorldPose(placement, out Vector3 worldPos, out Quaternion worldRot);
+        if (!TryReadWorldPose(placement, out Vector3 worldPos, out Quaternion worldRot))
+        {
+            ConfigManager.WriteConsoleWarning(
+                $"{LogPrefix} defer spawn {placement.DisplayLabel} — anchor pose not ready yet");
+            return false;
+        }
+
         ApplyFloorCabinetDisplayOffset(placement.SurfaceType, ref worldPos);
 
         if (!TrySpawnCabinetAtWorldPose(
@@ -436,8 +614,21 @@ public class MRLayoutRegistry : MonoBehaviour
         marker.Initialize(placement.Id, placement.CabinetDBName);
 
         spawnedById[placement.Id] = root;
+        BackfillWorldPoseCache(placement, worldPos, worldRot);
         ConfigManager.WriteConsole($"{LogPrefix} spawned {placement.DisplayLabel} at {worldPos}");
+        MRTransitionLog.Log(
+            $"Spawn {placement.DisplayLabel} pos={worldPos} rotY={worldRot.eulerAngles.y:F1} anchor={placement.AnchorUuid ?? "none"}");
         return true;
+    }
+
+    static void BackfillWorldPoseCache(MRCabinetPlacement placement, Vector3 displayWorldPos, Quaternion worldRot)
+    {
+        if (placement == null || placement.WorldPosition != null)
+            return;
+
+        Vector3 storagePos = WorldPositionForStorage(placement.SurfaceType, displayWorldPos);
+        placement.WorldPosition = MRVector3.From(storagePos);
+        placement.WorldRotation = MRQuaternion.From(worldRot);
     }
 
     bool TrySpawnCabinetAtWorldPose(
@@ -482,7 +673,7 @@ public class MRLayoutRegistry : MonoBehaviour
                 index,
                 worldPos,
                 worldRot,
-                mrSpaceOrigin,
+                null,
                 agentPlayerPositions: new List<AgentScenePosition>(),
                 backgroundSoundController: null);
         }
@@ -527,24 +718,55 @@ public class MRLayoutRegistry : MonoBehaviour
 
     public void ApplyGlobalAdjustmentsToSpawnedFloorCabinets()
     {
+        RefreshAllSpawnedPosesFromLayout(floorOnly: true);
+    }
+
+    /// <summary>Re-resolve layout poses after MRUK anchors register (e.g. second MR entry).</summary>
+    public void RefreshAllSpawnedPosesFromLayout(bool floorOnly = false)
+    {
         MRAdjustmentsSettings.EnsureLoaded();
         if (layout == null)
             return;
 
-        foreach (KeyValuePair<string, GameObject> entry in spawnedById)
+        EnsureLayoutLoaded();
+        int refreshed = 0;
+        int spawned = 0;
+
+        foreach (MRCabinetPlacement placement in layout.GetCabinets())
         {
-            if (entry.Value == null)
+            if (placement == null || string.IsNullOrEmpty(placement.Id))
                 continue;
 
-            MRCabinetPlacement placement = layout.FindById(entry.Key);
-            if (placement == null || placement.SurfaceType != PlacementSurfaceType.Floor)
+            if (floorOnly && placement.SurfaceType != PlacementSurfaceType.Floor)
                 continue;
 
-            ReadWorldPose(placement, out Vector3 worldPos, out Quaternion worldRot);
+            if (!TryReadWorldPose(placement, out Vector3 worldPos, out Quaternion worldRot))
+                continue;
+
             ApplyFloorCabinetDisplayOffset(placement.SurfaceType, ref worldPos);
-            entry.Value.transform.SetPositionAndRotation(worldPos, worldRot);
-            entry.Value.transform.localScale = Vector3.one * GetEffectiveCabinetScale(placement);
+
+            if (spawnedById.TryGetValue(placement.Id, out GameObject root) && root != null)
+            {
+                Vector3 before = root.transform.position;
+                root.transform.SetPositionAndRotation(worldPos, worldRot);
+                root.transform.localScale = Vector3.one * GetEffectiveCabinetScale(placement);
+                if (Vector3.Distance(before, worldPos) > 0.02f)
+                {
+                    MRTransitionLog.Log(
+                        $"Refresh {placement.DisplayLabel} {before} -> {worldPos} anchor={placement.AnchorUuid ?? "none"}");
+                }
+
+                refreshed++;
+                continue;
+            }
+
+            int index = spawnedById.Count;
+            if (TrySpawnPlacement(placement, MixedRealityManager.Instance?.MRSpaceOrigin, index))
+                spawned++;
         }
+
+        if (refreshed > 0 || spawned > 0)
+            ConfigManager.WriteConsole($"{LogPrefix} refreshed {refreshed} spawned {spawned} cabinet pose(s)");
     }
 
     public static float GetEffectiveCabinetScale(MRCabinetPlacement placement)
@@ -576,6 +798,9 @@ public class MRLayoutRegistry : MonoBehaviour
         Quaternion worldRotation,
         Guid anchorUuid)
     {
+        placement.WorldPosition = MRVector3.From(worldPosition);
+        placement.WorldRotation = MRQuaternion.From(worldRotation);
+
         Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
         if (MRAnchorPoseResolver.TryWriteAnchorRelativePose(
                 room,
@@ -598,20 +823,73 @@ public class MRLayoutRegistry : MonoBehaviour
         placement.Rotation = MRQuaternion.From(worldRotation);
     }
 
+    static bool TryReadWorldFallback(MRCabinetPlacement placement, out Vector3 worldPosition, out Quaternion worldRotation)
+    {
+        worldPosition = Vector3.zero;
+        worldRotation = Quaternion.identity;
+        if (placement?.WorldPosition == null || placement.WorldRotation == null)
+            return false;
+
+        worldPosition = placement.WorldPosition.ToVector3();
+        worldRotation = placement.WorldRotation.ToQuaternion();
+        return true;
+    }
+
+    static bool TryReadWorldPose(MRCabinetPlacement placement, out Vector3 worldPosition, out Quaternion worldRotation)
+    {
+        worldPosition = Vector3.zero;
+        worldRotation = Quaternion.identity;
+
+        if (placement == null)
+            return false;
+
+        if (!string.IsNullOrEmpty(placement.AnchorUuid))
+        {
+            Vector3 storedPosition = placement.Position != null ? placement.Position.ToVector3() : Vector3.zero;
+            Quaternion storedRotation = placement.Rotation != null ? placement.Rotation.ToQuaternion() : Quaternion.identity;
+            Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
+            if (MRAnchorPoseResolver.TryResolveWorldPose(
+                    room,
+                    placement.AnchorUuid,
+                    storedPosition,
+                    storedRotation,
+                    placement.SurfaceType,
+                    out worldPosition,
+                    out worldRotation))
+                return true;
+
+            if (TryReadWorldFallback(placement, out worldPosition, out worldRotation))
+            {
+                ConfigManager.WriteConsoleWarning(
+                    $"{LogPrefix} {placement.DisplayLabel} anchor unresolved — using world fallback {worldPosition}");
+                MRTransitionLog.LogWarning($"{placement.DisplayLabel} anchor unresolved — world fallback {worldPosition}");
+                return true;
+            }
+
+            MRTransitionLog.LogWarning($"{placement.DisplayLabel} pose unresolved (no anchor, no fallback)");
+            return false;
+        }
+
+        if (TryReadWorldFallback(placement, out worldPosition, out worldRotation))
+            return true;
+
+        if (placement.Position != null && placement.Rotation != null)
+        {
+            worldPosition = placement.Position.ToVector3();
+            worldRotation = placement.Rotation.ToQuaternion();
+            return true;
+        }
+
+        return false;
+    }
+
     static void ReadWorldPose(MRCabinetPlacement placement, out Vector3 worldPosition, out Quaternion worldRotation)
     {
-        Vector3 storedPosition = placement.Position != null ? placement.Position.ToVector3() : Vector3.zero;
-        Quaternion storedRotation = placement.Rotation != null ? placement.Rotation.ToQuaternion() : Quaternion.identity;
-
-        Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
-        MRAnchorPoseResolver.TryResolveWorldPose(
-            room,
-            placement.AnchorUuid,
-            storedPosition,
-            storedRotation,
-            placement.SurfaceType,
-            out worldPosition,
-            out worldRotation);
+        if (!TryReadWorldPose(placement, out worldPosition, out worldRotation))
+        {
+            worldPosition = placement?.Position != null ? placement.Position.ToVector3() : Vector3.zero;
+            worldRotation = placement?.Rotation != null ? placement.Rotation.ToQuaternion() : Quaternion.identity;
+        }
     }
 
     void EnsureWorldSpaceLayout(Transform mrSpaceOrigin)

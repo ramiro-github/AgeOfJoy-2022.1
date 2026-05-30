@@ -4,6 +4,7 @@ This program is free software: you can redistribute it and/or modify it under th
 
 using System;
 using System.Collections;
+using AOJ.Managers;
 using UnityEngine;
 
 public class MixedRealityManager : MonoBehaviour
@@ -23,6 +24,14 @@ public class MixedRealityManager : MonoBehaviour
     MRMrEnvironmentLighting mrLighting;
     MREnvironmentSurfaces environmentSurfaces;
     bool transitionInProgress;
+    Coroutine runningTransition;
+    int transitionGeneration;
+
+    Vector3? savedVrPlayerPosition;
+    Quaternion? savedVrPlayerRotation;
+
+    const string SavedMrPlayerPositionKey = "MR.LastSession.PlayerPosition";
+    const string SavedMrPlayerRotationKey = "MR.LastSession.PlayerRotation";
 
     /// <summary>True when VR gallery rules (CabinetsController slots, registry rooms) should run.</summary>
     public static bool IsVrExperience =>
@@ -62,8 +71,22 @@ public class MixedRealityManager : MonoBehaviour
         if (GetComponent<MRRoomInfoUI>() == null)
             gameObject.AddComponent<MRRoomInfoUI>();
 
+        if (GetComponent<MRModeInput>() == null)
+            gameObject.AddComponent<MRModeInput>();
+
+        if (GetComponent<MREditMenuInput>() == null)
+            gameObject.AddComponent<MREditMenuInput>();
+
+        if (GetComponent<MRConfigurationCabinetController>() == null)
+            gameObject.AddComponent<MRConfigurationCabinetController>();
+
+        if (GetComponent<MREditorMrSimulator>() == null)
+            gameObject.AddComponent<MREditorMrSimulator>();
+
         passthrough.Initialize();
         ConfigManager.WriteConsole($"{LogPrefix} ready (mode={CurrentMode})");
+        MRTransitionLog.EnsureSession("MixedRealityManager.Awake");
+        MRTransitionLog.Log($"MixedRealityManager ready logFile={MRTransitionLog.LogFilePath}");
     }
 
     void OnDestroy()
@@ -74,19 +97,94 @@ public class MixedRealityManager : MonoBehaviour
 
     public bool CanToggleMode() => !transitionInProgress && (sceneTransition == null || !sceneTransition.IsTransitionRunning);
 
+    public bool TransitionInProgress => transitionInProgress;
+
+    /// <summary>True when MR visuals/content are active (uses runtime state, not only CurrentMode).</summary>
+    public bool IsMrEnvironmentActive()
+    {
+        if (CurrentMode == ExperienceMode.MR || CurrentMode == ExperienceMode.MR_EDIT)
+            return true;
+
+        if (passthrough != null && passthrough.IsPassthroughActive)
+            return true;
+
+        if (layoutRegistry != null && layoutRegistry.SpawnedCount > 0)
+            return true;
+
+        if (MRConfigurationCabinetController.Instance != null
+            && MRConfigurationCabinetController.Instance.HasVisibleCabinet)
+            return true;
+
+        return MRSpaceOrigin != null;
+    }
+
     public void EnterMR()
     {
-        if (!CanToggleMode() || CurrentMode != ExperienceMode.VR)
+        MRTransitionLog.LogStep("EnterMR", "requested");
+        MRTransitionLog.LogManagerState("EnterMR-begin");
+        MRTransitionLog.LogScenes("EnterMR-begin");
+
+        if (CurrentMode == ExperienceMode.MR || CurrentMode == ExperienceMode.MR_EDIT)
+        {
+            MRTransitionLog.LogWarning("EnterMR ignored — already in MR mode");
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} EnterMR ignored — already in MR mode");
             return;
-        StartCoroutine(EnterMRCoroutine());
+        }
+
+        if (transitionInProgress)
+        {
+            MRTransitionLog.LogWarning("EnterMR ignored — transition already in progress");
+            return;
+        }
+
+        MRTransitionLog.EnsureSession("EnterMR");
+        BeginTransition(EnterMRCoroutine());
     }
 
     public void EnterVR()
     {
-        if (!CanToggleMode() || CurrentMode == ExperienceMode.VR)
+        MRTransitionLog.LogStep("EnterVR", "requested");
+        MRTransitionLog.LogManagerState("EnterVR-begin");
+        MRTransitionLog.LogScenes("EnterVR-begin");
+        MRTransitionLog.LogPassthrough("EnterVR-begin", passthrough);
+
+        if (!IsMrEnvironmentActive())
+        {
+            MRTransitionLog.LogWarning("EnterVR ignored — MR environment not active");
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} EnterVR ignored — MR environment not active");
             return;
-        StartCoroutine(EnterVRCoroutine());
+        }
+
+        if (transitionInProgress)
+        {
+            MRTransitionLog.LogWarning("EnterVR ignored — transition already in progress");
+            return;
+        }
+
+        MRTransitionLog.LogStep("EnterVR", "immediate passthrough off");
+        passthrough.DisablePassthrough(playFadeOut: false);
+        ResetLegacyPassthroughFlags();
+        BeginMrExitImmediateSync();
+
+        MRTransitionLog.LogPassthrough("EnterVR-after-immediate-disable", passthrough);
+        BeginTransition(EnterVRCoroutine());
     }
+
+    /// <summary>Fast sync hide only — Destroy deferred to EnterVRCoroutine (Libretro may block).</summary>
+    void BeginMrExitImmediateSync()
+    {
+        MRTransitionLog.LogStep("BeginMrExitImmediateSync");
+        CancelActivePlacementRay();
+        RememberMrPlayerPose();
+        MRConfigurationCabinetController.Instance?.ForceCloseEdit();
+        ActiveRegistry()?.SnapshotSpawnedWorldPosesToLayout();
+        MRConfigurationCabinetController.Instance?.HideForMrExit();
+        mrLighting?.Despawn();
+        int hidden = ActiveRegistry()?.HideAllMrCabinetsImmediateCount() ?? 0;
+        MRTransitionLog.Log($"sync hide done mrCabinetsHidden={hidden}");
+    }
+
+    MRLayoutRegistry ActiveRegistry() => MRLayoutRegistry.Instance ?? layoutRegistry;
 
     public void EnterMREdit()
     {
@@ -102,69 +200,306 @@ public class MixedRealityManager : MonoBehaviour
         SetMode(ExperienceMode.MR);
     }
 
-    IEnumerator EnterMRCoroutine()
+    void BeginTransition(IEnumerator body)
+    {
+        MRTransitionLog.LogStep("BeginTransition", $"generation will be {transitionGeneration + 1}");
+        CancelRunningTransition();
+        int generation = ++transitionGeneration;
+        MRTransitionLog.Log($"BeginTransition started generation={generation}");
+        runningTransition = StartCoroutine(RunTransition(body, generation));
+    }
+
+    void CancelRunningTransition()
+    {
+        if (runningTransition != null)
+        {
+            MRTransitionLog.LogWarning("CancelRunningTransition — stopping in-flight coroutine");
+            StopCoroutine(runningTransition);
+            runningTransition = null;
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} cancelled in-flight transition");
+        }
+
+        transitionInProgress = false;
+        sceneTransition?.ForceResetTransitionState();
+    }
+
+    IEnumerator RunTransition(IEnumerator body, int generation)
     {
         transitionInProgress = true;
-        ConfigManager.WriteConsole($"{LogPrefix} EnterMR start");
-
-        MRScenePermissions.Reset();
-        yield return MRScenePermissions.EnsureGranted();
-        MRRoomInfoUI.Instance?.RefreshContent();
-
-        MRVrSystemsGate.SuspendForMR();
-
-        // Passthrough primeiro, com cenas VR ainda carregadas (padrão Meta).
-        yield return passthrough.EnablePassthroughWhenReady();
-        if (!passthrough.PassthroughSystemReady)
+        MRTransitionLog.LogStep("RunTransition", $"coroutine start generation={generation}");
+        yield return body;
+        if (generation != transitionGeneration)
         {
-            ConfigManager.WriteConsoleError($"{LogPrefix} EnterMR aborted — passthrough system not ready");
-            transitionInProgress = false;
+            MRTransitionLog.LogWarning($"RunTransition aborted — stale generation={generation} current={transitionGeneration}");
             yield break;
         }
 
+        transitionInProgress = false;
+        runningTransition = null;
+        MRTransitionLog.LogStep("RunTransition", $"coroutine end generation={generation}");
+    }
+
+    bool IsTransitionCurrent(int generation) => generation == transitionGeneration;
+
+    IEnumerator EnterMRCoroutine()
+    {
+        int generation = transitionGeneration;
+        MRTransitionLog.LogStep("EnterMRCoroutine", $"start generation={generation} mode={CurrentMode}");
+        MRTransitionLog.LogManagerState("EnterMRCoroutine-start");
+        ConfigManager.WriteConsole($"{LogPrefix} EnterMR coroutine (mode={CurrentMode})");
+
+        MRScenePermissions.Reset();
+        MRTransitionLog.LogStep("EnterMRCoroutine", "before EnsureGranted");
+        yield return MRScenePermissions.EnsureGranted();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        MRRoomInfoUI.Instance?.RefreshContent();
+
+        RememberVrPlayerPose();
+        MRTransitionLog.LogStep("EnterMRCoroutine", "before SuspendForMR");
+        MRVrSystemsGate.SuspendForMR();
+
+        MRTransitionLog.LogStep("EnterMRCoroutine", "before EnablePassthroughWhenReady");
+        yield return passthrough.EnablePassthroughWhenReady();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        MRTransitionLog.LogPassthrough("EnterMRCoroutine-after-passthrough", passthrough);
+        if (!passthrough.PassthroughSystemReady)
+        {
+            MRTransitionLog.LogError("EnterMR aborted — passthrough system not ready");
+            ConfigManager.WriteConsoleError($"{LogPrefix} EnterMR aborted — passthrough system not ready");
+            yield break;
+        }
+
+        MRTransitionLog.LogStep("EnterMRCoroutine", "before UnloadVrScenes");
         yield return sceneTransition.UnloadVrScenes();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        MRTransitionLog.LogScenes("EnterMRCoroutine-after-unload");
+
+        DestroyMRSpaceOrigin();
+        RestoreMrPlayerPose();
+        MRTransitionLog.LogStep("EnterMRCoroutine", "after RestoreMrPlayerPose");
 
         EnsureMRSpaceOrigin();
         Transform player = FindPlayerTransform();
         if (environmentSurfaces != null)
             yield return environmentSurfaces.ProbeWhenReady(player);
+        if (!IsTransitionCurrent(generation))
+            yield break;
 
         if (environmentSurfaces != null && MRSpaceOrigin != null)
             environmentSurfaces.AlignOriginToFloor(MRSpaceOrigin, player);
 
+        MRTransitionLog.LogStep("EnterMRCoroutine", "before SetMode MR");
         SetMode(ExperienceMode.MR);
+        MRTransitionLog.LogStep("EnterMRCoroutine", "after SetMode MR");
 
         mrLighting?.Spawn(MRSpaceOrigin);
-        layoutRegistry?.SpawnAll(MRSpaceOrigin);
+        ActiveRegistry()?.SpawnAll(MRSpaceOrigin);
         MRConfigurationCabinetController.Instance?.SpawnAtMrOrigin();
 
-        transitionInProgress = false;
+        yield return RefreshMrPosesWhenReady(generation, player);
+
+        MRTransitionLog.LogManagerState("EnterMRCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterMR done");
+        MRTransitionLog.LogStep("EnterMRCoroutine", "DONE");
+    }
+
+    IEnumerator RefreshMrPosesWhenReady(int generation, Transform player)
+    {
+        MRTransitionLog.LogStep("EnterMRCoroutine", "RefreshMrPoses begin");
+        const int maxAttempts = 20;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            if (!IsTransitionCurrent(generation))
+                yield break;
+
+            if (environmentSurfaces != null && player != null && !environmentSurfaces.IsReady)
+                yield return environmentSurfaces.ProbeWhenReady(player);
+
+            ActiveRegistry()?.RefreshAllSpawnedPosesFromLayout();
+            MRConfigurationCabinetController.Instance?.RefreshPoseForMrReentry();
+
+            if (attempt == 0 || attempt == maxAttempts - 1)
+                MRTransitionLog.LogManagerState($"EnterMRCoroutine-refresh-{attempt}");
+
+            yield return null;
+        }
+
+        MRTransitionLog.LogStep("EnterMRCoroutine", "RefreshMrPoses end");
     }
 
     IEnumerator EnterVRCoroutine()
     {
-        transitionInProgress = true;
-        ConfigManager.WriteConsole($"{LogPrefix} EnterVR start");
+        int generation = transitionGeneration;
+        MRTransitionLog.LogStep("EnterVRCoroutine", $"start generation={generation} mode={CurrentMode}");
+        MRTransitionLog.LogManagerState("EnterVRCoroutine-start");
+        MRTransitionLog.LogScenes("EnterVRCoroutine-start");
+        ConfigManager.WriteConsole($"{LogPrefix} EnterVR coroutine (mode={CurrentMode})");
 
-        MRConfigurationCabinetController.Instance?.ForceCloseEdit();
-        MRConfigurationCabinetController.Instance?.Despawn();
         if (CurrentMode == ExperienceMode.MR_EDIT)
+        {
+            MRTransitionLog.Log("exiting MR_EDIT before VR transition");
             SetMode(ExperienceMode.MR);
+        }
 
-        layoutRegistry?.DespawnAll();
-        mrLighting?.Despawn();
+        MRTransitionLog.LogStep("EnterVRCoroutine", "before ReloadVrScenes");
+        yield return sceneTransition.ReloadVrScenes();
+        if (!IsTransitionCurrent(generation))
+        {
+            MRTransitionLog.LogWarning($"EnterVRCoroutine aborted after ReloadVrScenes generation={generation}");
+            yield break;
+        }
+
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after ReloadVrScenes");
+        MRTransitionLog.LogScenes("EnterVRCoroutine-after-reload");
+        MRTransitionLog.LogManagerState("EnterVRCoroutine-after-reload");
+
+        RestoreVrPlayerPose();
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after RestoreVrPlayerPose");
+
+        passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
+        ResetLegacyPassthroughFlags();
+        MRTransitionLog.LogPassthrough("EnterVRCoroutine-after-rebind", passthrough);
+
+        MRTransitionLog.LogStep("EnterVRCoroutine", "before SetMode VR");
+        SetMode(ExperienceMode.VR);
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after SetMode VR");
+        MRTransitionLog.LogStep("EnterVRCoroutine", "before ResumeForVR");
+        MRVrSystemsGate.ResumeForVR();
+        MRTransitionLog.LogManagerState("EnterVRCoroutine-after-resume");
+
+        MRLayoutRegistry registry = ActiveRegistry();
+        MRTransitionLog.Log($"DespawnAllAsync registry={(registry != null ? registry.name : "null")}");
+        if (registry != null)
+            yield return registry.DespawnAllAsync(stopLibretroFirst: false);
+        if (!IsTransitionCurrent(generation))
+        {
+            MRTransitionLog.LogWarning($"EnterVRCoroutine aborted after DespawnAllAsync generation={generation}");
+            yield break;
+        }
+
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after DespawnAllAsync");
+        MRTransitionLog.LogManagerState("EnterVRCoroutine-after-despawn");
+
+        MRVrSystemsGate.StopActiveLibretroGames();
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after StopActiveLibretroGames");
+
         environmentSurfaces?.ClearMrukScene();
         MRRoomInfoUI.Instance?.Hide();
-        passthrough.DisablePassthrough();
         DestroyMRSpaceOrigin();
-        SetMode(ExperienceMode.VR);
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after MR cleanup");
 
-        yield return sceneTransition.ReloadVrScenes();
-        MRVrSystemsGate.ResumeForVR();
+        MRTransitionLog.LogStep("EnterVRCoroutine", "before config cabinet ReleaseForVr");
+        MRConfigurationCabinetController.Instance?.ReleaseForVrTransition();
+        yield return null;
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after config cabinet ReleaseForVr");
 
-        transitionInProgress = false;
+        passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
+        ResetLegacyPassthroughFlags();
+        MRTransitionLog.LogPassthrough("EnterVRCoroutine-final", passthrough);
+        MRTransitionLog.LogScenes("EnterVRCoroutine-final");
+        MRTransitionLog.LogManagerState("EnterVRCoroutine-final");
+
         ConfigManager.WriteConsole($"{LogPrefix} EnterVR done");
+        MRTransitionLog.LogStep("EnterVRCoroutine", "DONE");
+    }
+
+    static void ResetLegacyPassthroughFlags()
+    {
+        if (EventManager.Instance != null)
+            EventManager.Instance.IsPassthrough = false;
+    }
+
+    void RememberVrPlayerPose()
+    {
+        Transform player = FindPlayerTransform();
+        if (player == null)
+            return;
+
+        savedVrPlayerPosition = player.position;
+        savedVrPlayerRotation = player.rotation;
+        MRTransitionLog.Log($"saved VR player pose pos={savedVrPlayerPosition.Value} rotY={savedVrPlayerRotation.Value.eulerAngles.y:F1}");
+        ConfigManager.WriteConsole($"{LogPrefix} saved VR player pose {savedVrPlayerPosition.Value}");
+    }
+
+    void RestoreVrPlayerPose()
+    {
+        if (!savedVrPlayerPosition.HasValue)
+        {
+            MRTransitionLog.LogWarning("RestoreVrPlayerPose skipped — no saved pose");
+            return;
+        }
+
+        Transform player = FindPlayerTransform();
+        if (player == null)
+        {
+            MRTransitionLog.LogError("RestoreVrPlayerPose failed — player transform null");
+            return;
+        }
+
+        Quaternion rotation = savedVrPlayerRotation ?? player.rotation;
+        player.SetPositionAndRotation(savedVrPlayerPosition.Value, rotation);
+        MRTransitionLog.Log($"restored VR player pose pos={savedVrPlayerPosition.Value} rotY={rotation.eulerAngles.y:F1}");
+        ConfigManager.WriteConsole($"{LogPrefix} restored VR player pose {savedVrPlayerPosition.Value}");
+
+        savedVrPlayerPosition = null;
+        savedVrPlayerRotation = null;
+    }
+
+    void RememberMrPlayerPose()
+    {
+        Transform player = FindPlayerTransform();
+        if (player == null)
+            return;
+
+        Vector3 position = player.position;
+        Quaternion rotation = player.rotation;
+        PlayerPrefs.SetString(SavedMrPlayerPositionKey, JsonUtility.ToJson(MRVector3.From(position)));
+        PlayerPrefs.SetString(SavedMrPlayerRotationKey, JsonUtility.ToJson(MRQuaternion.From(rotation)));
+        PlayerPrefs.Save();
+        MRTransitionLog.Log($"saved MR player pose pos={position} rotY={rotation.eulerAngles.y:F1}");
+    }
+
+    void RestoreMrPlayerPose()
+    {
+        string posJson = PlayerPrefs.GetString(SavedMrPlayerPositionKey, string.Empty);
+        string rotJson = PlayerPrefs.GetString(SavedMrPlayerRotationKey, string.Empty);
+        if (string.IsNullOrEmpty(posJson) || string.IsNullOrEmpty(rotJson))
+        {
+            MRTransitionLog.Log("RestoreMrPlayerPose skipped — no saved MR pose");
+            return;
+        }
+
+        MRVector3 pos = JsonUtility.FromJson<MRVector3>(posJson);
+        MRQuaternion rot = JsonUtility.FromJson<MRQuaternion>(rotJson);
+        if (pos == null || rot == null)
+            return;
+
+        Transform player = FindPlayerTransform();
+        if (player == null)
+        {
+            MRTransitionLog.LogError("RestoreMrPlayerPose failed — player transform null");
+            return;
+        }
+
+        Vector3 position = pos.ToVector3();
+        Quaternion rotation = rot.ToQuaternion();
+        player.SetPositionAndRotation(position, rotation);
+        MRTransitionLog.Log($"restored MR player pose pos={position} rotY={rotation.eulerAngles.y:F1}");
+        ConfigManager.WriteConsole($"{LogPrefix} restored MR player pose {position}");
+    }
+
+    static void CancelActivePlacementRay()
+    {
+        MRPlacementRayController ray = FindObjectOfType<MRPlacementRayController>();
+        if (ray != null && ray.IsActive)
+            ray.CancelActive();
     }
 
     void EnsureMRSpaceOrigin()
@@ -208,6 +543,7 @@ public class MixedRealityManager : MonoBehaviour
         if (CurrentMode == mode)
             return;
         CurrentMode = mode;
+        MRTransitionLog.Log($"SetMode {mode}");
         ConfigManager.WriteConsole($"{LogPrefix} mode={mode}");
         OnModeChanged?.Invoke(mode);
     }

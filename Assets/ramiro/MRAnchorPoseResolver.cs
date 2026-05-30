@@ -146,8 +146,8 @@ public static class MRAnchorPoseResolver
         if (anchor == null)
         {
             ConfigManager.WriteConsoleWarning(
-                $"{LogPrefix} anchor {anchorUuid} missing for {surface} — using stored coords as world fallback");
-            return true;
+                $"{LogPrefix} anchor {anchorUuid} missing for {surface} — pose unresolved (will retry)");
+            return false;
         }
 
         return LocalToWorld(anchor, storedPosition, storedRotation, out worldPosition, out worldRotation);

@@ -9,35 +9,39 @@ public class MRModeInput : MonoBehaviour
     const string LogPrefix = "[MRModeInput]";
 
     [SerializeField] float holdDurationSeconds = 3f;
-    [SerializeField] bool useRightController = true;
+    [SerializeField] float toggleCooldownSeconds = 5f;
 
     float holdTimer;
+    float cooldownTimer;
     bool wasPressed;
 
     void Update()
     {
-        if (MixedRealityManager.Instance == null || !MixedRealityManager.Instance.CanToggleMode())
+        if (MixedRealityManager.Instance == null)
         {
-            holdTimer = 0f;
-            wasPressed = false;
+            ResetHold();
             return;
         }
 
-        bool pressed = IsAButtonPressed();
+        if (cooldownTimer > 0f)
+            cooldownTimer -= Time.unscaledDeltaTime;
+
+        bool pressed = IsToggleButtonPressed();
         if (pressed)
         {
-            holdTimer += Time.deltaTime;
+            holdTimer += Time.unscaledDeltaTime;
             if (!wasPressed)
-                ConfigManager.WriteConsole($"{LogPrefix} holding toggle (A / Enter)...");
-            if (holdTimer >= holdDurationSeconds)
+                ConfigManager.WriteConsole($"{LogPrefix} holding toggle (A / Menu / Enter)...");
+            if (holdTimer >= holdDurationSeconds && cooldownTimer <= 0f)
             {
-                ToggleMode();
                 holdTimer = 0f;
+                cooldownTimer = toggleCooldownSeconds;
+                ToggleMode();
             }
         }
         else
         {
-            holdTimer = 0f;
+            ResetHold();
         }
 
         wasPressed = pressed;
@@ -46,26 +50,41 @@ public class MRModeInput : MonoBehaviour
     void ToggleMode()
     {
         var manager = MixedRealityManager.Instance;
-        if (manager.CurrentMode == ExperienceMode.VR)
-            manager.EnterMR();
-        else
+
+        ExperienceMode mode = manager.CurrentMode;
+        if (mode == ExperienceMode.MR || mode == ExperienceMode.MR_EDIT)
+        {
+            MRTransitionLog.Log("MRModeInput exit MR requested");
+            ConfigManager.WriteConsole($"{LogPrefix} exit MR requested (mode={mode})");
             manager.EnterVR();
+        }
+        else
+        {
+            MRTransitionLog.Log("MRModeInput enter MR requested");
+            ConfigManager.WriteConsole($"{LogPrefix} enter MR requested (mode={mode})");
+            manager.EnterMR();
+        }
 
         PulseHaptic();
-        ConfigManager.WriteConsole($"{LogPrefix} toggle requested (target mode pending)");
     }
 
-    bool IsAButtonPressed()
+    void ResetHold()
+    {
+        holdTimer = 0f;
+        wasPressed = false;
+    }
+
+    static bool IsToggleButtonPressed()
     {
 #if UNITY_EDITOR
         return Input.GetKey(KeyCode.JoystickButton0)
             || Input.GetKey(KeyCode.Return)
             || Input.GetKey(KeyCode.KeypadEnter);
 #else
-        OVRInput.Controller controller = useRightController
-            ? OVRInput.Controller.RTouch
-            : OVRInput.Controller.LTouch;
-        return OVRInput.Get(OVRInput.Button.One, controller);
+        return OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RTouch)
+            || OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.LTouch)
+            || OVRInput.Get(OVRInput.Button.Start, OVRInput.Controller.RTouch)
+            || OVRInput.Get(OVRInput.Button.Start, OVRInput.Controller.LTouch);
 #endif
     }
 
@@ -74,7 +93,8 @@ public class MRModeInput : MonoBehaviour
 #if !UNITY_EDITOR
         try
         {
-            OVRInput.SetControllerVibration(0.4f, 0.6f, OVRInput.Controller.RTouch);
+            OVRInput.SetControllerVibration(1f, 0.8f, OVRInput.Controller.RTouch);
+            OVRInput.SetControllerVibration(1f, 0.8f, OVRInput.Controller.LTouch);
         }
         catch
         {

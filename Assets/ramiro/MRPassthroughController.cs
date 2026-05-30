@@ -14,6 +14,7 @@ public class MRPassthroughController : MonoBehaviour
     const float SystemInitTimeoutSeconds = 10f;
     const float LayerReadyTimeoutSeconds = 5f;
     const string FadeSphereName = "SM_FadeSphere";
+    const string FadeOutTrigger = "FadeOutTrigger";
 
     OVRPassthroughLayer passthroughLayer;
     Camera xrCamera;
@@ -27,8 +28,15 @@ public class MRPassthroughController : MonoBehaviour
     bool savedEyeFovPremultipliedAlpha;
     bool initialized;
     bool passthroughSystemReady;
+    bool insightPassthroughEnabledBeforeMr;
 
     public bool IsPassthroughEnabled => passthroughLayer != null && passthroughLayer.enabled;
+
+    /// <summary>True when MR passthrough rendering is active (layer or EventManager flag).</summary>
+    public bool IsPassthroughActive =>
+        IsPassthroughEnabled
+        || (EventManager.Instance != null && EventManager.Instance.IsPassthrough);
+
     public bool PassthroughSystemReady => passthroughSystemReady;
 
     /// <summary>True when OVR/XR is active enough to query or enable passthrough (Quest build or Editor + Link).</summary>
@@ -68,6 +76,10 @@ public class MRPassthroughController : MonoBehaviour
         savedBackgroundColor = xrCamera.backgroundColor;
         savedOverlayType = passthroughLayer.overlayType;
         initialized = true;
+
+        if (OVRManager.instance != null)
+            insightPassthroughEnabledBeforeMr = OVRManager.instance.isInsightPassthroughEnabled;
+
         ConfigManager.WriteConsole($"{LogPrefix} initialized on {xrCamera.name}, layerType={savedOverlayType}");
     }
 
@@ -75,8 +87,14 @@ public class MRPassthroughController : MonoBehaviour
     {
         if (!initialized)
             Initialize();
+
+        // Layer was Destroy()'d on MR→VR exit; recreate before second VR→MR.
+        RebindXRCamera(createPassthroughLayerIfMissing: true);
         if (passthroughLayer == null || xrCamera == null)
+        {
+            MRTransitionLog.LogError("EnablePassthroughWhenReady aborted — no XR camera or passthrough layer");
             yield break;
+        }
 
         if (!IsPassthroughRuntimeAvailable())
         {
@@ -104,17 +122,23 @@ public class MRPassthroughController : MonoBehaviour
         LogPassthroughDiagnostics("after enable");
     }
 
-    public void DisablePassthrough()
+    public void DisablePassthrough(bool playFadeOut = true)
     {
+        MRTransitionLog.LogStep("MRPassthroughController.DisablePassthrough", $"playFadeOut={playFadeOut}");
+        RebindXRCamera(createPassthroughLayerIfMissing: false);
+
         if (passthroughLayer != null)
         {
             passthroughLayer.enabled = false;
-            passthroughLayer.overlayType = savedOverlayType;
+            passthroughLayer.hidden = true;
+            passthroughLayer.textureOpacity = 0f;
+            Destroy(passthroughLayer);
+            passthroughLayer = null;
         }
 
         if (xrCamera != null)
         {
-            xrCamera.clearFlags = savedClearFlags;
+            xrCamera.clearFlags = CameraClearFlags.Skybox;
             xrCamera.backgroundColor = savedBackgroundColor;
 
             Transform psMotes = xrCamera.transform.Find("PS_Motes");
@@ -125,16 +149,52 @@ public class MRPassthroughController : MonoBehaviour
         RenderSettings.fog = savedFog;
 
         if (OVRManager.instance != null)
+        {
             OVRManager.eyeFovPremultipliedAlphaModeEnabled = savedEyeFovPremultipliedAlpha;
+            OVRManager.instance.isInsightPassthroughEnabled = false;
+        }
 
         RestoreFadeSphereVisuals();
+
+        if (playFadeOut && fadeSphereAnimator != null)
+            fadeSphereAnimator.SetTrigger(FadeOutTrigger);
 
         MREditorMrSimulator.Instance?.ClearPassthroughBackdrop();
 
         if (EventManager.Instance != null)
             EventManager.Instance.IsPassthrough = false;
 
+        LogPassthroughDiagnostics("after disable");
         ConfigManager.WriteConsole($"{LogPrefix} passthrough OFF");
+        MRTransitionLog.LogPassthrough("DisablePassthrough-done", this);
+    }
+
+    /// <summary>Re-resolve camera/layer after additive scene reload, then force passthrough off.</summary>
+    public void RebindCameraAndDisablePassthrough(bool playFadeOut = true)
+    {
+        MRTransitionLog.LogStep("MRPassthroughController.RebindCameraAndDisablePassthrough", $"playFadeOut={playFadeOut}");
+        RebindXRCamera(createPassthroughLayerIfMissing: false);
+        DisablePassthrough(playFadeOut);
+    }
+
+    void RebindXRCamera(bool createPassthroughLayerIfMissing = true)
+    {
+        Camera resolved = ResolveXRCamera();
+        if (resolved == null)
+            return;
+
+        if (resolved != xrCamera)
+        {
+            xrCamera = resolved;
+            passthroughLayer = xrCamera.GetComponent<OVRPassthroughLayer>();
+            MRTransitionLog.Log($"RebindXRCamera -> {xrCamera.name}");
+            ConfigManager.WriteConsole($"{LogPrefix} rebound XR camera to {xrCamera.name}");
+        }
+
+        if (passthroughLayer == null && xrCamera != null)
+            passthroughLayer = xrCamera.GetComponent<OVRPassthroughLayer>();
+        if (createPassthroughLayerIfMissing && passthroughLayer == null && xrCamera != null)
+            passthroughLayer = xrCamera.gameObject.AddComponent<OVRPassthroughLayer>();
     }
 
     void ApplyPassthroughRendering()
@@ -142,8 +202,14 @@ public class MRPassthroughController : MonoBehaviour
         if (!IsPassthroughRuntimeAvailable())
             return;
 
+        if (passthroughLayer == null && xrCamera != null)
+            passthroughLayer = xrCamera.gameObject.AddComponent<OVRPassthroughLayer>();
+
         EnsureInsightPassthroughEnabled();
         SuppressFadeSphereVisuals();
+
+        if (OVRManager.instance != null)
+            insightPassthroughEnabledBeforeMr = OVRManager.instance.isInsightPassthroughEnabled;
 
         savedOverlayType = passthroughLayer.overlayType;
         savedEyeFovPremultipliedAlpha = OVRManager.eyeFovPremultipliedAlphaModeEnabled;

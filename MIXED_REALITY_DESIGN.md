@@ -293,15 +293,18 @@ O projeto na v0.5.x tem foco intenso em **estabilidade de memória** no Quest (i
 
 Alternar modos **sem menu de sistema moderno** — integrado à ficção do fliperama.
 
-### 9.2 Opções de UX (validar com mantenedor)
+### 9.2 Mecanismo imersivo (decisão)
 
-| Mecanismo | Descrição |
-|-----------|-----------|
-| Cabinet de controle | Botões físicos na máquina: “Gallery (VR)” / “Home Arcade (MR)” |
-| AGEBasic | Script no cabinet de configuração |
-| Objeto na galeria | Porta/objeto anos 80 que “leva” ao quarto real |
+| Mecanismo | Descrição | Estado |
+|-----------|-----------|--------|
+| **Cabine telefónica** | `PF_Payphone` em `IntroGalleryExterior` — portal “viagem no espaço” VR↔MR | **Especificado** — ver [`MR_PHONE_BOOTH_TRANSITION.md`](MR_PHONE_BOOTH_TRANSITION.md) |
+| Cabinet de controle | Botões “Gallery (VR)” / “Home Arcade (MR)” | Alternativa; não MVP |
+| AGEBasic | Script no cabinet de configuração | Fase futura |
+| Toggle A/Menu 3s | `MRModeInput` | Debug / fallback técnico |
 
-### 9.3 Comportamento técnico
+### 9.3 Comportamento técnico (actual + cabine)
+
+**Toggle genérico (implementado hoje):**
 
 ```
 VR → MR:
@@ -310,9 +313,25 @@ VR → MR:
   - MRLayoutRegistry.SpawnAll()
 
 MR → VR:
+  - Reload cenas VR
   - MRLayoutRegistry.DespawnAll()
   - Desativar passthrough
-  - Carregar galeria VR padrão
+  - ResumeForVR()
+```
+
+**Cabine telefónica (a implementar — spec completa em [`MR_PHONE_BOOTH_TRANSITION.md`](MR_PHONE_BOOTH_TRANSITION.md)):**
+
+```
+VR → MR (telefone):
+  - Jogador dentro da cabine; guardar localPose jogador ↔ cabine
+  - Efeito viagem; resgatar cabine antes do unload
+  - EnterMRFromPhoneBooth — jogador continua dentro no quarto real
+
+MR → VR (config + telefone):
+  - CRT: Show/Hide cabine em MR
+  - Show → entrar na cabine → telefone → viagem
+  - Reload IntroGalleryExterior; cabine no transform fixo da cena
+  - Jogador reposto dentro; instância MR viajante removida
 ```
 
 ### 9.4 Locomotion em MR

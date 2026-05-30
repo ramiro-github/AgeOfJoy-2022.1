@@ -23,16 +23,6 @@ public static class MixedRealityBootstrap
 
         var root = new GameObject(RootName);
         root.AddComponent<MixedRealityManager>();
-        root.AddComponent<MRPassthroughController>();
-        root.AddComponent<MRSceneTransition>();
-        root.AddComponent<MRModeInput>();
-        root.AddComponent<MREditMenuInput>();
-        root.AddComponent<MRLayoutRegistry>();
-        root.AddComponent<MREnvironmentSurfaces>();
-        root.AddComponent<MRMrEnvironmentLighting>();
-        root.AddComponent<MRConfigurationCabinetController>();
-        root.AddComponent<MRRoomInfoUI>();
-        root.AddComponent<MREditorMrSimulator>();
 
         if (active.name == "TestMRmanager")
             root.AddComponent<MRTestGameCabinetSpawn>();

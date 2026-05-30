@@ -207,6 +207,9 @@ Assets/Editor/PreloadSigningAlias.cs
 /ProjectSettings/ProjectSettings.asset
 /Packages/packages-lock.json
 
+# MR transition logs from Quest (see Debug/README.md)
+/Debug/*.log
+
 # Cursor agentes especialistas (local — não versionar)
 /.cursor/
 /AGENTS.md

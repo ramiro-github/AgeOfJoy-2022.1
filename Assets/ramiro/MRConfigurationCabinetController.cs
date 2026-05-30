@@ -19,6 +19,8 @@ public class MRConfigurationCabinetController : MonoBehaviour
     const string SavedPosePositionKey = "MR.ConfigurationCabinetMiniMR.Position";
     const string SavedPoseRotationKey = "MR.ConfigurationCabinetMiniMR.Rotation";
     const string SavedPoseAnchorUuidKey = "MR.ConfigurationCabinetMiniMR.AnchorUuid";
+    const string SavedWorldPositionKey = "MR.ConfigurationCabinetMiniMR.WorldPosition";
+    const string SavedWorldRotationKey = "MR.ConfigurationCabinetMiniMR.WorldRotation";
     const int SavedPoseSchemaWorld = 2;
     const int SavedPoseSchemaAnchorRelative = 3;
     const bool EnableSavedPoseLoad = true;
@@ -62,6 +64,9 @@ public class MRConfigurationCabinetController : MonoBehaviour
 
     public bool IsEditOpen => isEditOpen;
     public bool HasCabinet => cabinetInstance != null;
+
+    /// <summary>True when the config cabinet is visible (hidden instances kept for re-entry do not count).</summary>
+    public bool HasVisibleCabinet => cabinetInstance != null && cabinetInstance.activeInHierarchy;
 
     void Awake()
     {
@@ -145,8 +150,14 @@ public class MRConfigurationCabinetController : MonoBehaviour
 
     void HandleModeChanged(ExperienceMode mode)
     {
-        if (mode == ExperienceMode.VR)
-            Despawn();
+        if (mode != ExperienceMode.VR)
+            return;
+
+        // EnterVRCoroutine owns teardown — sync Despawn here blocked on Libretro Destroy.
+        if (MixedRealityManager.Instance != null && MixedRealityManager.Instance.TransitionInProgress)
+            return;
+
+        Despawn();
     }
 
     public void ToggleEdit()
@@ -238,14 +249,44 @@ public class MRConfigurationCabinetController : MonoBehaviour
 
     public void ForceCloseEdit()
     {
-        crtController?.EndSession();
+        if (isEditOpen || (crtController != null && crtController.IsSessionActive))
+            crtController?.EndSession();
         isEditOpen = false;
+    }
+
+    /// <summary>Hide config cabinet immediately on MR exit — avoid sync Destroy before coroutine runs.</summary>
+    public void HideForMrExit()
+    {
+        CancelActivePlacementRay();
+        if (initialPlacementRayCoroutine != null)
+        {
+            StopCoroutine(initialPlacementRayCoroutine);
+            initialPlacementRayCoroutine = null;
+        }
+
+        if (cabinetInstance != null)
+        {
+            SaveWorldFallbackPose(cabinetInstance.transform.position, cabinetInstance.transform.rotation);
+            cabinetInstance.SetActive(false);
+        }
+
+        UnbindCoinInsert();
+        initialPlacementRequested = false;
+
+        MRTransitionLog.Log($"HideForMrExit hasCabinet={cabinetInstance != null} wasInstantiated={cabinetWasInstantiated}");
+    }
+
+    /// <summary>MR→VR: no-op if HideForMrExit already ran in BeginMrExitImmediateSync.</summary>
+    public void ReleaseForVrTransition()
+    {
+        MRTransitionLog.LogStep("MRConfigurationCabinetController.ReleaseForVrTransition", "skip — sync exit already done");
     }
 
     public void SpawnAtMrOrigin()
     {
         if (cabinetInstance != null)
         {
+            cabinetInstance.SetActive(true);
             ApplyPoseToExistingCabinet();
             RequestInitialPlacementRayWhenReady();
             return;
@@ -311,15 +352,47 @@ public class MRConfigurationCabinetController : MonoBehaviour
 
         if (HasValidSavedPose() && TryLoadSavedPose(out Vector3 savedPos, out Quaternion savedRot))
         {
-            cabinetInstance.transform.SetPositionAndRotation(savedPos, savedRot);
-            ConfigManager.WriteConsole($"{LogPrefix} pose (saved) pos={savedPos} rot={savedRot.eulerAngles}");
+            if (Vector3.Distance(cabinetInstance.transform.position, savedPos) > 0.02f
+                || Quaternion.Angle(cabinetInstance.transform.rotation, savedRot) > 0.5f)
+            {
+                cabinetInstance.transform.SetPositionAndRotation(savedPos, savedRot);
+                ConfigManager.WriteConsole($"{LogPrefix} pose (saved) pos={savedPos} rot={savedRot.eulerAngles}");
+                MRTransitionLog.Log($"config cabinet pose (saved) pos={savedPos} rotY={savedRot.eulerAngles.y:F1}");
+            }
+
+            return;
+        }
+
+        if (TryLoadWorldFallbackPose(out Vector3 fallbackPos, out Quaternion fallbackRot))
+        {
+            if (Vector3.Distance(cabinetInstance.transform.position, fallbackPos) > 0.02f
+                || Quaternion.Angle(cabinetInstance.transform.rotation, fallbackRot) > 0.5f)
+            {
+                cabinetInstance.transform.SetPositionAndRotation(fallbackPos, fallbackRot);
+                ConfigManager.WriteConsole($"{LogPrefix} pose (world fallback) pos={fallbackPos} rot={fallbackRot.eulerAngles}");
+                MRTransitionLog.Log($"config cabinet pose (world fallback) pos={fallbackPos} rotY={fallbackRot.eulerAngles.y:F1}");
+            }
+
             return;
         }
 
         if (NeedsInitialPlacementRay())
+        {
+            PlaceCabinetNearViewForInitialRay(cabinetInstance);
+            ConfigManager.WriteConsole($"{LogPrefix} awaiting initial placement ray (re-entry)");
             return;
+        }
 
         ApplyPoseToCabinet(cabinetInstance);
+    }
+
+    /// <summary>Re-apply saved or MRUK pose after MR re-entry (MRUK may register anchors a frame later).</summary>
+    public void RefreshPoseForMrReentry()
+    {
+        if (cabinetInstance == null || !cabinetInstance.activeInHierarchy)
+            return;
+
+        ApplyPoseToExistingCabinet();
     }
 
     void CancelActivePlacementRay()
@@ -381,10 +454,10 @@ public class MRConfigurationCabinetController : MonoBehaviour
         RequestInitialPlacementRayWhenReady();
     }
 
-    static bool NeedsInitialPlacementRay() =>
+    bool NeedsInitialPlacementRay() =>
         !EnableSavedPoseLoad || !HasValidSavedPose();
 
-    static bool HasValidSavedPose()
+    bool HasValidSavedPose()
     {
         if (!EnableSavedPoseLoad || !TryLoadSavedPose(out _, out _))
             return false;
@@ -785,7 +858,10 @@ public class MRConfigurationCabinetController : MonoBehaviour
         return host.AddComponent<MRPlacementRayController>();
     }
 
-    static bool TryLoadSavedPose(out Vector3 worldPosition, out Quaternion worldRotation)
+    bool TryLoadSavedPose(out Vector3 worldPosition, out Quaternion worldRotation) =>
+        TryLoadSavedPose(GetPlacementSurfaceType(), out worldPosition, out worldRotation);
+
+    static bool TryLoadSavedPose(PlacementSurfaceType surface, out Vector3 worldPosition, out Quaternion worldRotation)
     {
         worldPosition = Vector3.zero;
         worldRotation = Quaternion.identity;
@@ -816,14 +892,16 @@ public class MRConfigurationCabinetController : MonoBehaviour
         {
             string anchorUuidText = PlayerPrefs.GetString(SavedPoseAnchorUuidKey, string.Empty);
             Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
-            MRAnchorPoseResolver.TryResolveWorldPose(
-                room,
-                anchorUuidText,
-                storedPosition,
-                storedRotation,
-                PlacementSurfaceType.Wall,
-                out worldPosition,
-                out worldRotation);
+            if (!MRAnchorPoseResolver.TryResolveWorldPose(
+                    room,
+                    anchorUuidText,
+                    storedPosition,
+                    storedRotation,
+                    surface,
+                    out worldPosition,
+                    out worldRotation))
+                return false;
+
             return true;
         }
 
@@ -838,14 +916,43 @@ public class MRConfigurationCabinetController : MonoBehaviour
         PlayerPrefs.DeleteKey(SavedPosePositionKey);
         PlayerPrefs.DeleteKey(SavedPoseRotationKey);
         PlayerPrefs.DeleteKey(SavedPoseAnchorUuidKey);
+        PlayerPrefs.DeleteKey(SavedWorldPositionKey);
+        PlayerPrefs.DeleteKey(SavedWorldRotationKey);
         PlayerPrefs.Save();
     }
 
-    static bool HasSavedPose() => TryLoadSavedPose(out _, out _);
-
-    static void SavePose(Vector3 worldPosition, Quaternion worldRotation, System.Guid anchorUuid = default)
+    static void SaveWorldFallbackPose(Vector3 worldPosition, Quaternion worldRotation)
     {
-        PlacementSurfaceType surfaceType = PlacementSurfaceType.Wall;
+        PlayerPrefs.SetString(SavedWorldPositionKey, JsonUtility.ToJson(MRVector3.From(worldPosition)));
+        PlayerPrefs.SetString(SavedWorldRotationKey, JsonUtility.ToJson(MRQuaternion.From(worldRotation)));
+        PlayerPrefs.Save();
+    }
+
+    static bool TryLoadWorldFallbackPose(out Vector3 worldPosition, out Quaternion worldRotation)
+    {
+        worldPosition = Vector3.zero;
+        worldRotation = Quaternion.identity;
+
+        string posJson = PlayerPrefs.GetString(SavedWorldPositionKey, string.Empty);
+        string rotJson = PlayerPrefs.GetString(SavedWorldRotationKey, string.Empty);
+        if (string.IsNullOrEmpty(posJson) || string.IsNullOrEmpty(rotJson))
+            return false;
+
+        MRVector3 pos = JsonUtility.FromJson<MRVector3>(posJson);
+        MRQuaternion rot = JsonUtility.FromJson<MRQuaternion>(rotJson);
+        if (pos == null || rot == null)
+            return false;
+
+        worldPosition = pos.ToVector3();
+        worldRotation = rot.ToQuaternion();
+        return true;
+    }
+
+    static bool HasSavedPose() => PlayerPrefs.HasKey(SavedPoseFlagKey);
+
+    void SavePose(Vector3 worldPosition, Quaternion worldRotation, System.Guid anchorUuid = default)
+    {
+        PlacementSurfaceType surfaceType = GetPlacementSurfaceType();
         Meta.XR.MRUtilityKit.MRUKRoom room = MREnvironmentSurfaces.Instance?.CurrentRoom;
 
         if (MRAnchorPoseResolver.TryWriteAnchorRelativePose(
@@ -871,6 +978,7 @@ public class MRConfigurationCabinetController : MonoBehaviour
             PlayerPrefs.SetInt(SavedPoseFlagKey, SavedPoseSchemaWorld);
         }
 
+        SaveWorldFallbackPose(worldPosition, worldRotation);
         PlayerPrefs.Save();
     }
 
