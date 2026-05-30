@@ -23,6 +23,7 @@ public class MRConfigurationController : MonoBehaviour
         Cabinets,
         Added,
         Adjustments,
+        PhoneBooth,
         Help
     }
 
@@ -100,6 +101,7 @@ public class MRConfigurationController : MonoBehaviour
         mrSpaceOrigin = EnsureMrSpaceOrigin();
         placementRay = EnsurePlacementRayController();
         MRAdjustmentsSettings.EnsureLoaded();
+        MRPhoneBoothSettings.EnsureLoaded();
         registry.EnsureLayoutLoaded();
         registry.SpawnAll(mrSpaceOrigin);
 
@@ -116,6 +118,8 @@ public class MRConfigurationController : MonoBehaviour
         navMenu.Deselect();
         ActivateShader(true);
         DrawCurrentScreen();
+        MRPhoneBoothVisibility.EnsureMrInstance();
+        MRPhoneBoothVisibility.ApplySavedVisibility();
         ConfigManager.WriteConsole($"{LogPrefix} session started (catalog={catalogNames.Count})");
     }
 
@@ -214,6 +218,7 @@ public class MRConfigurationController : MonoBehaviour
         navMenu.AddOption("ADDED", "Cabinets in mr-layout.yaml");
         navMenu.AddOption("MOVE CONFIG", "Reposition ConfigurationCabinetMiniMR");
         navMenu.AddOption("ADJUSTMENTS", "Scale and floor position for game cabinets");
+        navMenu.AddOption("PHONE BOOTH", "Show or hide phone booth in MR");
         navMenu.AddOption("HELP", "Controls");
         navMenu.AddOption("EXIT", "Close panel");
     }
@@ -257,6 +262,9 @@ public class MRConfigurationController : MonoBehaviour
                 break;
             case Screen.Adjustments:
                 DrawAdjustmentsPage();
+                break;
+            case Screen.PhoneBooth:
+                DrawPhoneBoothPage();
                 break;
             case Screen.Help:
                 DrawHelpPage();
@@ -358,6 +366,23 @@ public class MRConfigurationController : MonoBehaviour
         DrawFooter("R stick: select/adjust +/-0.01   B: back");
     }
 
+    void DrawPhoneBoothPage()
+    {
+        screen.PrintCentered(0, "PHONE BOOTH", true);
+        screen.PrintLine(1, false, '-');
+
+        string status = MRPhoneBoothVisibility.GetStatusLabel();
+        screen.Print(1, 4, $"Status: {status}", true);
+
+        bool visible = MRPhoneBoothSettings.Visible;
+        string action = visible ? "Hide phone booth" : "Show phone booth";
+        screen.Print(1, 7, "> " + action, true);
+
+        screen.Print(1, 10, "Hidden saves room space", false);
+        screen.Print(1, 11, "Show restores last pose", false);
+        DrawFooter("A: toggle show/hide   B: back");
+    }
+
     void DrawHelpPage()
     {
         screen.PrintCentered(0, "HELP", true);
@@ -366,9 +391,10 @@ public class MRConfigurationController : MonoBehaviour
         screen.Print(2, 7, "B: back / close panel", false);
         screen.Print(2, 9, "Add/Move: floor ray", false);
         screen.Print(2, 10, "Adjustments: scale/floor", false);
-        screen.Print(2, 11, "R stick L/R: adjust +/-0.01", false);
-        screen.Print(2, 12, "R stick L/R: rotate Y*", false);
-        screen.Print(2, 13, "* floor cabinets / prefab", false);
+        screen.Print(2, 11, "Phone booth: show/hide", false);
+        screen.Print(2, 12, "R stick L/R: adjust +/-0.01", false);
+        screen.Print(2, 13, "R stick L/R: rotate Y*", false);
+        screen.Print(2, 14, "* floor cabinets / prefab", false);
         screen.Print(2, 15, "Catalog = cabinetsdb/", false);
         screen.Print(2, 16, "In Scene = mr-layout.yaml", false);
         DrawFooter("B: back");
@@ -484,6 +510,10 @@ public class MRConfigurationController : MonoBehaviour
             case Screen.Added:
                 BeginMoveSelectedPlacement();
                 break;
+            case Screen.PhoneBooth:
+                MRPhoneBoothVisibility.Toggle();
+                DrawCurrentScreen();
+                break;
         }
     }
 
@@ -504,6 +534,9 @@ public class MRConfigurationController : MonoBehaviour
             case "ADJUSTMENTS":
                 selectedAdjustmentIndex = 0;
                 currentScreen = Screen.Adjustments;
+                break;
+            case "PHONE BOOTH":
+                currentScreen = Screen.PhoneBooth;
                 break;
             case "HELP":
                 currentScreen = Screen.Help;
@@ -539,6 +572,7 @@ public class MRConfigurationController : MonoBehaviour
             case Screen.Cabinets:
             case Screen.Added:
             case Screen.Adjustments:
+            case Screen.PhoneBooth:
             case Screen.Help:
                 currentScreen = Screen.NavMain;
                 navMenu.selectedIndex = 0;

@@ -143,15 +143,61 @@ public class MRPhoneBoothPortal : MonoBehaviour
         return state;
     }
 
+    Coroutine hideCoroutine;
+
+    public bool IsVisible => gameObject.activeSelf;
+
     public void ApplyMrVisibility()
     {
-        MRPhoneBoothSettings.EnsureLoaded();
-        SetVisible(MRPhoneBoothSettings.Visible);
+        MRPhoneBoothVisibility.ApplySavedVisibility();
     }
 
-    public void SetVisible(bool visible)
+    public void SetVisible(bool visible, bool playHideEffect = true)
     {
-        gameObject.SetActive(visible);
+        if (visible)
+        {
+            CancelHideEffect();
+            if (!gameObject.activeSelf)
+                gameObject.SetActive(true);
+            return;
+        }
+
+        if (!gameObject.activeSelf)
+            return;
+
+        if (!playHideEffect)
+        {
+            CancelHideEffect();
+            gameObject.SetActive(false);
+            return;
+        }
+
+        if (hideCoroutine != null)
+            return;
+
+        hideCoroutine = StartCoroutine(HideAfterEffectRoutine());
+    }
+
+    void CancelHideEffect()
+    {
+        if (hideCoroutine == null)
+            return;
+
+        StopCoroutine(hideCoroutine);
+        hideCoroutine = null;
+    }
+
+    IEnumerator HideAfterEffectRoutine()
+    {
+        yield return PlayHideEffectBeforeDisable();
+        hideCoroutine = null;
+        gameObject.SetActive(false);
+    }
+
+    /// <summary>Override or extend later for dissolve/fade before the booth is disabled.</summary>
+    protected virtual IEnumerator PlayHideEffectBeforeDisable()
+    {
+        yield break;
     }
 
     /// <summary>Restore every handset on this booth after immersive travel.</summary>
@@ -229,6 +275,51 @@ public class MRPhoneBoothPortal : MonoBehaviour
             Destroy(go);
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "DestroyTravelerInstance");
+    }
+
+    public static MRPhoneBoothPortal FindMrTravelerInstance(bool includeInactive = true)
+    {
+        if (activeTraveler != null)
+            return activeTraveler;
+
+        MixedRealityManager manager = MixedRealityManager.Instance;
+        if (manager == null)
+            return null;
+
+        return manager.GetComponentInChildren<MRPhoneBoothPortal>(includeInactive);
+    }
+
+    public static MRPhoneBoothPortal EnsureMrTravelerInstance()
+    {
+        MRPhoneBoothPortal traveler = FindMrTravelerInstance(includeInactive: true);
+        if (traveler != null)
+        {
+            if (activeTraveler == null)
+                activeTraveler = traveler;
+            return traveler;
+        }
+
+        MixedRealityManager manager = MixedRealityManager.Instance;
+        if (manager == null)
+            return null;
+
+        GameObject prefab = Resources.Load<GameObject>("Decoration/PhoneBooth/PF_Payphone");
+        if (prefab == null)
+        {
+            ConfigManager.WriteConsoleError($"{LogPrefix} prefab missing Resources/Decoration/PhoneBooth/PF_Payphone");
+            return null;
+        }
+
+        GameObject instance = Object.Instantiate(prefab);
+        instance.name = BoothObjectName;
+        MRPhoneBoothPortal portal = EnsureOn(instance);
+        AdoptAsTraveler(portal, manager.transform);
+
+        Transform player = FindPlayerTransform();
+        MREnvironmentSurfaces surfaces = manager.GetComponent<MREnvironmentSurfaces>();
+        portal.PlaceOnMrFloor(surfaces, player);
+        ConfigManager.WriteConsole($"{LogPrefix} ensured MR phone booth instance");
+        return portal;
     }
 
     public static MRPhoneBoothPortal FindSceneBoothPortal()

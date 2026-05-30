@@ -367,6 +367,9 @@ public class MixedRealityManager : MonoBehaviour
 
         yield return RefreshMrPosesWhenReady(generation, player);
 
+        MRPhoneBoothVisibility.EnsureMrInstance();
+        MRPhoneBoothVisibility.ApplySavedVisibility();
+
         MRTransitionLog.LogManagerState("EnterMRCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterMR done");
         MRTransitionLog.LogStep("EnterMRCoroutine", "DONE");
@@ -425,7 +428,8 @@ public class MixedRealityManager : MonoBehaviour
 
         portal.PlaceOnMrFloor(environmentSurfaces, player);
         ApplyPhoneBoothTravelState(portal, travelState);
-        portal.ApplyMrVisibility();
+        MRPhoneBoothSettings.SetVisible(true);
+        portal.SetVisible(true);
         portal.NotifyHandsetsTravelComplete();
 
         MRTransitionLog.LogManagerState("EnterMRFromPhoneBoothCoroutine-final");
