@@ -114,6 +114,7 @@ public static class MRGameCabinetAttractSetup
                 screen.DistanceMaxToPlayerToActivateVideo = MinVideoDistanceMeters;
             if (screen.DistanceMaxToPlayerToActivateAudio < MinVideoDistanceMeters)
                 screen.DistanceMaxToPlayerToActivateAudio = MinVideoDistanceMeters;
+            screen.EnsureAttractLoopRunning();
         }
 
         AGEBasicScreenController[] ageScreens =

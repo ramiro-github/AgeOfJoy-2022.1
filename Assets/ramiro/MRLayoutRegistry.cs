@@ -198,6 +198,26 @@ public class MRLayoutRegistry : MonoBehaviour
         return hidden;
     }
 
+    /// <summary>End Libretro on MR cabinets while screen components still exist (before hide/destroy).</summary>
+    public void StopAllMrLibretroGames()
+    {
+        foreach (GameObject root in CollectAllMrCabinetRoots())
+            StopLibretroOnCabinet(root);
+    }
+
+    /// <summary>Restart attract-mode loops after MR spawn (Start may have run before wiring).</summary>
+    public void EnsureAttractPlaybackOnSpawned()
+    {
+        foreach (GameObject root in spawnedById.Values)
+        {
+            if (root == null)
+                continue;
+
+            foreach (LibretroScreenController screen in root.GetComponentsInChildren<LibretroScreenController>(true))
+                screen.EnsureAttractLoopRunning();
+        }
+    }
+
     /// <summary>Hide then destroy MR cabinets over several frames so Libretro OnDestroy does not block VR reload.</summary>
     public IEnumerator DespawnAllAsync(bool stopLibretroFirst = false)
     {

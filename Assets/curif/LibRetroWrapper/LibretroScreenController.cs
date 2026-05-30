@@ -298,6 +298,16 @@ public class LibretroScreenController : MonoBehaviour
         }
     }
 
+    /// <summary>Restart attract-mode BT after MR hide/destroy or spawn wiring.</summary>
+    public void EnsureAttractLoopRunning()
+    {
+        if (!initialized || !isActiveAndEnabled)
+            return;
+
+        if (mainCoroutine == null)
+            mainCoroutine = StartCoroutine(runBT());
+    }
+
     IEnumerator runBT()
     {
         // LibretroMameCore.WriteConsole($"[LibretroScreenController.runBT] coroutine BT cicle Start {gameObject.name}");

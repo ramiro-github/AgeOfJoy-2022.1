@@ -177,6 +177,7 @@ public class MixedRealityManager : MonoBehaviour
         CancelActivePlacementRay();
         RememberMrPlayerPose();
         MRConfigurationCabinetController.Instance?.ForceCloseEdit();
+        ActiveRegistry()?.StopAllMrLibretroGames();
         ActiveRegistry()?.SnapshotSpawnedWorldPosesToLayout();
         MRConfigurationCabinetController.Instance?.HideForMrExit();
         mrLighting?.Despawn();
@@ -302,6 +303,9 @@ public class MixedRealityManager : MonoBehaviour
         ActiveRegistry()?.SpawnAll(MRSpaceOrigin);
         MRConfigurationCabinetController.Instance?.SpawnAtMrOrigin();
 
+        yield return null;
+        ActiveRegistry()?.EnsureAttractPlaybackOnSpawned();
+
         yield return RefreshMrPosesWhenReady(generation, player);
 
         MRTransitionLog.LogManagerState("EnterMRCoroutine-final");
@@ -375,9 +379,11 @@ public class MixedRealityManager : MonoBehaviour
         MRTransitionLog.LogManagerState("EnterVRCoroutine-after-resume");
 
         MRLayoutRegistry registry = ActiveRegistry();
+        MRVrSystemsGate.StopActiveLibretroGames();
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after StopActiveLibretroGames");
         MRTransitionLog.Log($"DespawnAllAsync registry={(registry != null ? registry.name : "null")}");
         if (registry != null)
-            yield return registry.DespawnAllAsync(stopLibretroFirst: false);
+            yield return registry.DespawnAllAsync(stopLibretroFirst: true);
         if (!IsTransitionCurrent(generation))
         {
             MRTransitionLog.LogWarning($"EnterVRCoroutine aborted after DespawnAllAsync generation={generation}");
@@ -388,7 +394,7 @@ public class MixedRealityManager : MonoBehaviour
         MRTransitionLog.LogManagerState("EnterVRCoroutine-after-despawn");
 
         MRVrSystemsGate.StopActiveLibretroGames();
-        MRTransitionLog.LogStep("EnterVRCoroutine", "after StopActiveLibretroGames");
+        MRTransitionLog.LogStep("EnterVRCoroutine", "after StopActiveLibretroGames-final");
 
         environmentSurfaces?.ClearMrukScene();
         MRRoomInfoUI.Instance?.Hide();

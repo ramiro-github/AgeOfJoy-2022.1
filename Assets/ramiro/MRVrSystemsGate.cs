@@ -45,6 +45,7 @@ public static class MRVrSystemsGate
 
         var screens = Object.FindObjectsOfType<LibretroScreenController>(true);
         MRTransitionLog.Log($"StopActiveLibretroGames screens={screens.Length}");
+        bool ended = false;
         foreach (LibretroScreenController screen in screens)
         {
             if (screen == null)
@@ -54,7 +55,14 @@ public static class MRVrSystemsGate
                 MRTransitionLog.Log($"StopActiveLibretroGames End on {screen.name}");
                 ConfigManager.WriteConsole($"{LogPrefix} ending LibRetro on {screen.name}");
                 LibretroMameCore.End(screen.ScreenName, screen.GameFile);
+                ended = true;
             }
+        }
+
+        if (LibretroMameCore.GameLoaded && !ended)
+        {
+            MRTransitionLog.LogWarning("StopActiveLibretroGames force end — screen destroyed before End()");
+            LibretroMameCore.ForceEndActiveGame();
         }
     }
 
