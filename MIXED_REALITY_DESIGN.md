@@ -8,7 +8,7 @@
 | **Versão de referência** | [0.5.0](https://github.com/curif/AgeOfJoy-2022.1/tree/0.5.0) |
 | **Licença** | GPL-3.0 |
 | **Status** | MVP fases 1–2c funcional na branch 0.5.0 (validado Quest 3) |
-| **Documento** | v1.3 — Maio de 2026 |
+| **Documento** | v1.4 — Maio de 2026 |
 
 ---
 
@@ -49,6 +49,11 @@ Simulador de fliperama em VR para Meta Quest, feito em Unity (C#), com máquinas
 - Spawn MR aplica **`skinFromInformation`** (texturas/materiais) — espelha `CabinetsController` VR; `MRLibretroWarmup` inicializa Libretro na main thread antes do spawn.
 - **Locomotion VR desligada em MR** — move, turn e teleport suspensos via `ChangeControls.SetMrLocomotionSuspended`.
 - Occlusão avançada e **Meta Spatial Anchor API** (`OVRSpatialAnchor`) permanecem fases futuras; drift de tracking mitigado parcialmente por anchors MRUK.
+- **Cabine telefónica VR↔MR** (`PF_Payphone`): grab no handset → viagem imersiva; spec e código em [`MR_PHONE_BOOTH_TRANSITION.md`](MR_PHONE_BOOTH_TRANSITION.md).
+- **Props de ambiente:** catálogo `Resources/ramiro/PrefabsEnvironment/` (exclui `ConfigurationCabinetMiniMR`); persistência em `mr-environment-layout.yaml`; menu CRT **ENVIRONMENT**.
+- **Placement tecto:** `PlacementSurfaceType.Ceiling` + `TryGetCeilingPointFromRay` para props com `MRPlacementProfile.surfaceType = Ceiling`.
+- **Menus CRT simplificados:** removidos ADDED / ENV ADDED; **CABINETS** e **ENVIRONMENT** usam coluna **In** + **A** Add/Rem + **Y** Move (se In=Yes).
+- **Input B:** `WasBackPressed()` com edge detection — voltar submenu sem fechar sessão CRT.
 
 ### 2.4 Princípio de contribuição (`Contributing.md`)
 
@@ -197,7 +202,7 @@ cabinets:
     position: { x: 1.2, y: 0, z: -0.8 }   # local ao anchor se anchorUuid presente
     rotation: { x: 0, y: 0.707, z: 0, w: 0.707 }
     scale: 1.0
-    surfaceType: 0              # Floor=0, Wall=1 (PlacementSurfaceType)
+    surfaceType: 0              # Floor=0, Wall=1, Ceiling=2 (PlacementSurfaceType)
     facingAxis: 0               # PlacementFacingAxis (ex.: NegativeX=3 para ConfigurationCabinetMiniMR)
 ```
 
@@ -234,6 +239,29 @@ public class MRLayout
     public List<MRCabinetPlacement> Cabinets = new();
 }
 ```
+
+### 6.5 Modelo de dados: `mr-environment-layout.yaml`
+
+Props decorativos MR (ventoinhas, etc.) — separado do layout de cabinets de jogo.
+
+**Localização:** `{BaseDir}/cabinetsdb/mr-environment-layout.yaml`
+
+```yaml
+version: 1
+props:
+  - id: "prop-001"
+    prefabName: "PF_Fan"
+    anchorUuid: "a1b2c3d4-..."
+    position: { x: 0, y: 2.5, z: 0 }
+    rotation: { x: 0, y: 0, z: 0, w: 1 }
+    scale: 1.0
+    surfaceType: 2              # Ceiling=2 para props no tecto
+    facingAxis: 0
+```
+
+**Catálogo:** `MREnvironmentCatalog` carrega prefabs de `Resources/ramiro/PrefabsEnvironment/`; **exclui** `ConfigurationCabinetMiniMR` (spawn automático via `MRConfigurationCabinetController`).
+
+**Registry:** `MREnvironmentRegistry` — spawn/despawn/move; `MRPlacedEnvironment` liga instância ↔ id yaml.
 
 ---
 
@@ -297,7 +325,7 @@ Alternar modos **sem menu de sistema moderno** — integrado à ficção do flip
 
 | Mecanismo | Descrição | Estado |
 |-----------|-----------|--------|
-| **Cabine telefónica** | `PF_Payphone` em `IntroGalleryExterior` — portal “viagem no espaço” VR↔MR | **Especificado** — ver [`MR_PHONE_BOOTH_TRANSITION.md`](MR_PHONE_BOOTH_TRANSITION.md) |
+| **Cabine telefónica** | `PF_Payphone` em `IntroGalleryExterior` — portal “viagem no espaço” VR↔MR | **Implementado** — [`MR_PHONE_BOOTH_TRANSITION.md`](MR_PHONE_BOOTH_TRANSITION.md) |
 | Cabinet de controle | Botões “Gallery (VR)” / “Home Arcade (MR)” | Alternativa; não MVP |
 | AGEBasic | Script no cabinet de configuração | Fase futura |
 | Toggle A/Menu 3s | `MRModeInput` | Debug / fallback técnico |
@@ -319,17 +347,18 @@ MR → VR:
   - ResumeForVR()
 ```
 
-**Cabine telefónica (a implementar — spec completa em [`MR_PHONE_BOOTH_TRANSITION.md`](MR_PHONE_BOOTH_TRANSITION.md)):**
+**Cabine telefónica (implementado — [`MR_PHONE_BOOTH_TRANSITION.md`](MR_PHONE_BOOTH_TRANSITION.md)):**
 
 ```
 VR → MR (telefone):
+  - PayphoneHandsetGrab + MRPhoneBoothPortal
   - Jogador dentro da cabine; guardar localPose jogador ↔ cabine
-  - Efeito viagem; resgatar cabine antes do unload
-  - EnterMRFromPhoneBooth — jogador continua dentro no quarto real
+  - Efeito viagem (fade); MixedRealityManager.EnterMRFromPhoneBooth
+  - Jogador continua dentro no quarto real
 
 MR → VR (config + telefone):
-  - CRT: Show/Hide cabine em MR
-  - Show → entrar na cabine → telefone → viagem
+  - CRT: PHONE BOOTH → Show/Hide (MRPhoneBoothVisibility)
+  - Show → entrar na cabine → handset → viagem inversa
   - Reload IntroGalleryExterior; cabine no transform fixo da cena
   - Jogador reposto dentro; instância MR viajante removida
 ```
@@ -353,13 +382,20 @@ Implementação: `MRVrSystemsGate.SuspendForMR()` → `ChangeControls.SetMrLocom
 
 ### 10.1 Visão geral
 
-Em `MR_EDIT`, o jogador abre o **CRT do `ConfigurationCabinetMiniMR`** (ficha/coin) com:
+Em `MR_EDIT`, o jogador abre o **CRT do `ConfigurationCabinetMiniMR`** (ficha/coin) com menus:
 
-- Lista de cabinets **já no ambiente** (delete, move com raio).
-- Catálogo de cabinets **disponíveis em `cabinetsdb`** (add com raio).
-- **Raio** do controller direito para apontar onde o cabinet ficará.
+| Menu | Função |
+|------|--------|
+| **CABINETS** | Catálogo `cabinetsdb/`; coluna **In**; **A** Add/Rem; **Y** Move (se In=Yes) |
+| **ENVIRONMENT** | Props `PrefabsEnvironment/`; mesma lógica In / A / Y |
+| **MOVE CONFIG** | Reposicionar o ConfigurationCabinetMiniMR (parede) |
+| **ADJUSTMENTS** | Escala global + offset Y chão (todos floor cabinets) |
+| **PHONE BOOTH** | Show/Hide cabine telefónica em MR |
+| **HELP** / **EXIT** | Controlos / fechar sessão CRT |
 
-**Fluxo Add/Move (cabinet de jogo):** ao selecionar Add ou Move, `SuspendForExternalPlacement()` põe o CRT em idle (ecrã “Cabinet ready”), ejecta a ficha, sai de `MR_EDIT`, e o jogador usa o placement ray no chão. O menu **não** permanece na lista CABINETS/ADDED durante o ray. Após confirmar ou cancelar, o CRT mantém idle até **re-inserir a ficha**.
+**Fluxo Add/Move (cabinet ou prop):** ao seleccionar Add ou Move, `SuspendForExternalPlacement()` põe o CRT em idle (ecrã “Cabinet ready”), ejecta a ficha, sai de `MR_EDIT`, e o jogador usa o placement ray. Após confirmar ou cancelar, o CRT mantém idle até **re-inserir a ficha**.
+
+**Superfícies de placement:** Floor, Wall, **Ceiling** (via `MRPlacementProfile` no prefab).
 
 ### 10.1.1 ADJUSTMENTS (ajustes globais)
 
@@ -589,7 +625,7 @@ stateDiagram-v2
 | **1** | Passthrough + `ExperienceMode` + toggle imersivo | Alterna VR/MR sem crash; MR sem cabinets |
 | **2a** | `mr-layout.yaml` + spawn ao entrar MR | Cabinets aparecem nas poses salvas |
 | **2b** | UI na mão: listar + deletar | Remove do ambiente e persiste |
-| **2c** | Raio + preview + adicionar (+ mover) | ✅ ray Wall/Floor; Add/Move ADDED + config cabinet; suspend CRT + re-coin; input A edge |
+| **2c** | Raio + preview + adicionar (+ mover) + props + phone booth | ✅ ray Floor/Wall/Ceiling; menus CABINETS/ENVIRONMENT unificados; phone booth; input A/B edge |
 | **3** | Occlusão por paredes reais | Cabinets atrás de paredes são tampados |
 | **4** | Spatial Anchor Meta | Parcial: MRUK anchor UUID (v3); falta `OVRSpatialAnchor` API completa |
 | **5** | Polish: limites, performance, Quest 2 doc | Testes comunitários |
@@ -638,6 +674,9 @@ Assets/ramiro/
   MixedRealityManager.cs
   MixedRealityBootstrap.cs
   MRLayoutRegistry.cs
+  MREnvironmentRegistry.cs
+  MREnvironmentCatalog.cs
+  MRPlacedEnvironment.cs
   MRAnchorPoseResolver.cs
   MRPlacementRayController.cs
   MRPlacementProfile.cs
@@ -655,10 +694,21 @@ Assets/ramiro/
   MRMrEnvironmentLighting.cs
   MRModeInput.cs
   MREditMenuInput.cs
+  PayphoneHandsetGrab.cs
+  MRPhoneBoothPortal.cs
+  MRPhoneBoothVisibility.cs
+  MRPhoneBoothSettings.cs
+  PhoneBoothTravelState.cs
+  MRPlacedCabinet.cs
   Data/
-    MRLayout.cs
+    MRLayout.cs                    # MRLayout + MREnvironmentLayout
   Resources/ (via Unity)
     Resources/ramiro/PrefabsEnvironment/ConfigurationCabinetMiniMR.prefab
+    Resources/ramiro/PrefabsEnvironment/PF_Fan.prefab (exemplo prop)
+    Resources/Decoration/PhoneBooth/PF_Payphone.prefab
+  cabinetsdb/
+    mr-layout.yaml
+    mr-environment-layout.yaml
 ```
 
 *(Design original previa `Assets/curif/MixedReality/` — código real está em `Assets/ramiro/`.)*
@@ -772,3 +822,6 @@ Must follow “Preserving the Simulation” in `Contributing.md` — retro/in-wo
 |--------|------|-------|
 | 1.0 | 2026-05-22 | Documento inicial — design MR comunitário |
 | 1.1 | 2026-05-28 | Estado implementado: `Assets/ramiro/`, placement ray, locomotion suspend, schema `surfaceType`/`facingAxis` |
+| 1.2 | 2026-05-28 | Layout v3 anchor-relative, skinning, Libretro warmup, ADJUSTMENTS, CRT idle fix |
+| 1.3 | 2026-05-28 | Menus ADJUSTMENTS, rotação stick direito, validado Quest 3 |
+| 1.4 | 2026-05-28 | Phone booth VR↔MR, ENVIRONMENT props, ceiling placement, menus unificados, fix B edge |

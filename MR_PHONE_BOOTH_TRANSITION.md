@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |-------|-------|
-| **Status** | Especificação — implementar **após** transição MR↔VR estável no Quest |
+| **Status** | **Implementado** — validado Quest 3 (branch `0.5.0`, fork ramiro) |
 | **Relacionado** | [`MIXED_REALITY_DESIGN.md`](MIXED_REALITY_DESIGN.md) §9 |
 | **Branch** | `0.5.0` |
-| **Código actual** | `Assets/ramiro/` (`MixedRealityManager`, `MRConfigurationController`, …) |
+| **Código** | `PayphoneHandsetGrab.cs`, `MRPhoneBoothPortal.cs`, `MRPhoneBoothVisibility.cs`, `MRPhoneBoothSettings.cs`, `PhoneBoothTravelState.cs`, `MixedRealityManager.cs` |
 
 ---
 
@@ -30,7 +30,7 @@ O toggle genérico **A/Menu 3s** (`MRModeInput`) permanece para debug; em produ�
 | Config MR | `Resources/ramiro/PrefabsEnvironment/ConfigurationCabinetMiniMR.prefab` |
 | Efeito fade (existente) | `SM_FadeSphere` + animator (`FadeInTrigger` / `FadeOutTrigger`) — reutilizar padrão de `MRPassthroughController` / `PassthroughTriggerHandler` |
 
-**Estado actual:** prefab com mesh, colliders, luzes e `AudioCue` / `Audio_Clunk`; **sem** script ligado ao `MixedRealityManager`.
+**Estado actual:** prefab com `PayphoneHandsetGrab` (handset) + `MRPhoneBoothPortal` (viagem); instância MR gerida por `MixedRealityManager`; visibilidade em MR via menu CRT **PHONE BOOTH** (`MRPhoneBoothVisibility`).
 
 ---
 
