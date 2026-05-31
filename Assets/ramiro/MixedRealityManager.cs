@@ -443,6 +443,10 @@ public class MixedRealityManager : MonoBehaviour
         portal.SetVisible(true);
         portal.NotifyHandsetsTravelComplete();
 
+        yield return portal.PlayTravelArrivalExplosionAndWait();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
         MRTransitionLog.LogManagerState("EnterMRFromPhoneBoothCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterMRFromPhoneBooth done");
         MRTransitionLog.LogStep("EnterMRFromPhoneBoothCoroutine", "DONE");
@@ -499,6 +503,14 @@ public class MixedRealityManager : MonoBehaviour
 
         passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
         ResetLegacyPassthroughFlags();
+
+        MRPhoneBoothPortal arrivalPortal = scenePortal != null ? scenePortal : travelerPortal;
+        if (arrivalPortal != null)
+        {
+            yield return arrivalPortal.PlayTravelArrivalExplosionAndWait();
+            if (!IsTransitionCurrent(generation))
+                yield break;
+        }
 
         MRTransitionLog.LogManagerState("EnterVRFromPhoneBoothCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterVRFromPhoneBooth done");

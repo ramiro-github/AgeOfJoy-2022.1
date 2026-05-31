@@ -14,6 +14,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     const string BoothObjectName = "PF_Payphone";
     const string HandsetAudioCueObjectName = "AudioCue";
     const string SpaceshipEngineAudioObjectName = "AudioSpaceshipEngine";
+    const string ExplosionAudioObjectName = "AudioExplosion";
     const string ExteriorSceneName = "IntroGalleryExterior";
     const float DefaultTravelDurationSeconds = 3.5f;
 
@@ -25,6 +26,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
     [SerializeField] AudioSource handsetAudioCue;
     [Tooltip("Child named AudioSpaceshipEngine — plays during fade; MR/VR load runs after it ends.")]
     [SerializeField] AudioSource spaceshipEngineAudio;
+    [Tooltip("Child named AudioExplosion — plays when immersive travel finishes (after MR/VR load).")]
+    [SerializeField] AudioSource explosionAudio;
 
     bool isTravelerInstance;
     int playersInside;
@@ -49,6 +52,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         EnsureInteriorTrigger();
         EnsureHandsetAudioCue();
         EnsureSpaceshipEngineAudio();
+        EnsureExplosionAudio();
     }
 
     void OnEnable()
@@ -440,11 +444,19 @@ public class MRPhoneBoothPortal : MonoBehaviour
         spaceshipEngineAudio = FindChildAudioSource(SpaceshipEngineAudioObjectName);
     }
 
+    void EnsureExplosionAudio()
+    {
+        if (explosionAudio != null)
+            return;
+
+        explosionAudio = FindChildAudioSource(ExplosionAudioObjectName);
+    }
+
     AudioSource FindChildAudioSource(string objectName)
     {
         foreach (Transform child in GetComponentsInChildren<Transform>(true))
         {
-            if (child.name != objectName)
+            if (!string.Equals(child.name, objectName, System.StringComparison.OrdinalIgnoreCase))
                 continue;
 
             AudioSource source = child.GetComponent<AudioSource>();
@@ -474,6 +486,14 @@ public class MRPhoneBoothPortal : MonoBehaviour
         }
 
         yield return PlayAudioSourceAndWait(spaceshipEngineAudio, SpaceshipEngineAudioObjectName);
+    }
+
+    /// <summary>After MR/VR load completes — journey has ended.</summary>
+    public IEnumerator PlayTravelArrivalExplosionAndWait()
+    {
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey end (AudioExplosion)");
+        EnsureExplosionAudio();
+        yield return PlayAudioSourceAndWait(explosionAudio, ExplosionAudioObjectName);
     }
 
     IEnumerator PlayAudioSourceAndWait(AudioSource source, string objectName)
