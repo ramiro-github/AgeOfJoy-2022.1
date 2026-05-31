@@ -446,6 +446,35 @@ public class PayphoneHandsetGrab : MonoBehaviour
         phoneBoothPortal.NotifyHandsetGrabbedForTravel();
     }
 
+    /// <summary>Editor Play Mode: same path as XR grab — detach handset and start immersive booth travel.</summary>
+    public void SimulateEditorGrabForTravel()
+    {
+        if (!Application.isEditor)
+            return;
+
+        isGrabbed = true;
+        virtualGrabFromTravel = false;
+        EnsureNotStatic();
+        EnsurePhoneBoothPortal();
+
+        NotifyPhoneBoothPortalTravel();
+        DetachFromCradleForGrab();
+
+        followTransform = ResolveDefaultHandFollowTransform();
+        CacheFollowOffset();
+
+        if (body != null)
+        {
+            body.isKinematic = true;
+            body.WakeUp();
+        }
+
+        RefreshHandHideIfGrabbed();
+        ConfigManager.WriteConsole($"{LogPrefix} editor simulated handset grab for booth travel");
+    }
+
+    public static PayphoneHandsetGrab FindOnPortal(MRPhoneBoothPortal portal) => FindGrabOnPortal(portal);
+
     /// <summary>
     /// Leave the cradle but stay under the traveling booth so UnloadVrScenes does not destroy the handset.
     /// </summary>

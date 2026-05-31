@@ -12,6 +12,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
 {
     const string LogPrefix = "[MRPhoneBoothPortal]";
     const string BoothObjectName = "PF_Payphone";
+    const string HandsetAudioCueObjectName = "AudioCue";
     const string ExteriorSceneName = "IntroGalleryExterior";
     const float DefaultTravelDurationSeconds = 3.5f;
 
@@ -19,7 +20,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
     [SerializeField] float travelDurationSeconds = DefaultTravelDurationSeconds;
     [SerializeField] BoxCollider interiorTrigger;
-    [SerializeField] AudioSource travelAudioSource;
+    [Tooltip("Child named AudioCue (PF_Grabbable_Phone) — plays when handset is grabbed, before travel.")]
+    [SerializeField] AudioSource handsetAudioCue;
 
     bool isTravelerInstance;
     int playersInside;
@@ -42,8 +44,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     void Awake()
     {
         EnsureInteriorTrigger();
-        if (travelAudioSource == null)
-            travelAudioSource = GetComponentInChildren<AudioSource>();
+        EnsureHandsetAudioCue();
     }
 
     void OnEnable()
@@ -402,8 +403,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         travelInProgress = true;
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect start");
 
-        if (travelAudioSource != null && travelAudioSource.clip != null)
-            travelAudioSource.Play();
+        yield return PlayHandsetAudioCueAndWait();
 
         var fadeSphere = GameObject.Find("SM_FadeSphere");
         Animator fadeAnimator = fadeSphere != null ? fadeSphere.GetComponent<Animator>() : null;
@@ -418,6 +418,56 @@ public class MRPhoneBoothPortal : MonoBehaviour
         handsetGrabbed = false;
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect end");
         onComplete?.Invoke();
+    }
+
+    void EnsureHandsetAudioCue()
+    {
+        if (handsetAudioCue != null)
+            return;
+
+        handsetAudioCue = FindHandsetAudioCueSource();
+    }
+
+    AudioSource FindHandsetAudioCueSource()
+    {
+        foreach (Transform child in GetComponentsInChildren<Transform>(true))
+        {
+            if (child.name != HandsetAudioCueObjectName)
+                continue;
+
+            AudioSource source = child.GetComponent<AudioSource>();
+            if (source != null)
+                return source;
+        }
+
+        return null;
+    }
+
+    IEnumerator PlayHandsetAudioCueAndWait()
+    {
+        EnsureHandsetAudioCue();
+        if (handsetAudioCue == null || handsetAudioCue.clip == null)
+        {
+            ConfigManager.WriteConsoleWarning(
+                $"{LogPrefix} AudioCue missing or has no clip — skipping pre-travel audio");
+            yield break;
+        }
+
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"AudioCue play clip={handsetAudioCue.clip.name}");
+        handsetAudioCue.Stop();
+        handsetAudioCue.Play();
+
+        float pitch = Mathf.Max(0.01f, Mathf.Abs(handsetAudioCue.pitch));
+        float waitSeconds = handsetAudioCue.clip.length / pitch + 0.05f;
+        float elapsed = 0f;
+
+        while (handsetAudioCue.isPlaying && elapsed < waitSeconds)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "AudioCue finished");
     }
 
     float ComputeLowestWorldY()

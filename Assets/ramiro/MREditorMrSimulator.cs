@@ -43,9 +43,20 @@ public class MREditorMrSimulator : MonoBehaviour
 #if UNITY_EDITOR
         if (logControlsOnStart && Application.isEditor)
         {
-            ConfigManager.WriteConsole($"{LogPrefix} VR mode — hold Enter 3s → MR (MRUK room + walls)");
+            ConfigManager.WriteConsole($"{LogPrefix} VR mode — hold Enter 3s → MR genérico (sem cabine)");
+            ConfigManager.WriteConsole($"{LogPrefix} VR/MR cabine — tecla P = gancho levantado + viagem imersiva (phone booth)");
             ConfigManager.WriteConsole($"{LogPrefix} In MR: Y 3s or M = ConfigurationCabinet panel");
         }
+#endif
+    }
+
+    void Update()
+    {
+#if UNITY_EDITOR
+        if (!Application.isEditor || !Input.GetKeyDown(KeyCode.P))
+            return;
+
+        TrySimulatePhoneBoothTravel();
 #endif
     }
 
@@ -88,5 +99,85 @@ public class MREditorMrSimulator : MonoBehaviour
         backdropActive = false;
 #endif
     }
+
+#if UNITY_EDITOR
+    void TrySimulatePhoneBoothTravel()
+    {
+        MixedRealityManager manager = MixedRealityManager.Instance;
+        if (manager == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} P — MixedRealityManager missing (play from FixedScene?)");
+            return;
+        }
+
+        if (manager.TransitionInProgress)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} P — transition already running");
+            return;
+        }
+
+        if (!manager.CanToggleMode())
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} P — scene transition busy");
+            return;
+        }
+
+        MRPhoneBoothPortal portal = ResolvePhoneBoothPortalForEditor(manager);
+        if (portal == null)
+        {
+            ConfigManager.WriteConsoleWarning(
+                $"{LogPrefix} P — no PF_Payphone (need IntroGalleryExterior or MR traveler booth)");
+            return;
+        }
+
+        SnapPlayerInsideBoothForEditor(portal);
+
+        PayphoneHandsetGrab grab = PayphoneHandsetGrab.FindOnPortal(portal);
+        if (grab != null)
+            grab.SimulateEditorGrabForTravel();
+        else
+            portal.NotifyHandsetGrabbedForTravel();
+
+        ConfigManager.WriteConsole(
+            $"{LogPrefix} P — immersive phone booth travel (mode={manager.CurrentMode}, portal={portal.name})");
+    }
+
+    static MRPhoneBoothPortal ResolvePhoneBoothPortalForEditor(MixedRealityManager manager)
+    {
+        if (manager.CurrentMode == ExperienceMode.VR)
+            return MRPhoneBoothPortal.FindSceneBoothPortal();
+
+        if (!manager.IsMrEnvironmentActive())
+            return null;
+
+        MRPhoneBoothPortal traveler = MRPhoneBoothPortal.FindMrTravelerInstance(includeInactive: true);
+        if (traveler != null)
+            return traveler;
+
+        return MRPhoneBoothPortal.EnsureMrTravelerInstance();
+    }
+
+    static void SnapPlayerInsideBoothForEditor(MRPhoneBoothPortal portal)
+    {
+        Transform player = FindPlayerTransformForEditor();
+        if (player == null || portal == null)
+            return;
+
+        Vector3 localPos = new Vector3(0f, 0.05f, -0.15f);
+        player.SetPositionAndRotation(
+            portal.transform.TransformPoint(localPos),
+            portal.transform.rotation);
+    }
+
+    static Transform FindPlayerTransformForEditor()
+    {
+        var pc = Object.FindObjectOfType<PlayerController>();
+        if (pc != null && pc.PlayerControllerGameObject != null)
+            return pc.PlayerControllerGameObject.transform;
+
+        var xrOrigin = Object.FindObjectOfType<Unity.XR.CoreUtils.XROrigin>();
+        return xrOrigin != null ? xrOrigin.transform : null;
+    }
+#endif
 
 }
