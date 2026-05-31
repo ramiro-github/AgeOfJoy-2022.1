@@ -13,6 +13,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     const string LogPrefix = "[MRPhoneBoothPortal]";
     const string BoothObjectName = "PF_Payphone";
     const string HandsetAudioCueObjectName = "AudioCue";
+    const string SpaceshipEngineAudioObjectName = "AudioSpaceshipEngine";
     const string ExteriorSceneName = "IntroGalleryExterior";
     const float DefaultTravelDurationSeconds = 3.5f;
 
@@ -22,6 +23,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
     [SerializeField] BoxCollider interiorTrigger;
     [Tooltip("Child named AudioCue (PF_Grabbable_Phone) — plays when handset is grabbed, before travel.")]
     [SerializeField] AudioSource handsetAudioCue;
+    [Tooltip("Child named AudioSpaceshipEngine — plays during fade; MR/VR load runs after it ends.")]
+    [SerializeField] AudioSource spaceshipEngineAudio;
 
     bool isTravelerInstance;
     int playersInside;
@@ -45,6 +48,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     {
         EnsureInteriorTrigger();
         EnsureHandsetAudioCue();
+        EnsureSpaceshipEngineAudio();
     }
 
     void OnEnable()
@@ -405,13 +409,13 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         yield return PlayHandsetAudioCueAndWait();
 
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey start (spaceship engine)");
         var fadeSphere = GameObject.Find("SM_FadeSphere");
         Animator fadeAnimator = fadeSphere != null ? fadeSphere.GetComponent<Animator>() : null;
         if (fadeAnimator != null)
             fadeAnimator.SetTrigger("FadeInTrigger");
 
-        float duration = Mathf.Max(1f, travelDurationSeconds);
-        yield return new WaitForSeconds(duration);
+        yield return PlaySpaceshipEngineAndWait();
 
         travelInProgress = false;
         travelCoroutine = null;
@@ -425,14 +429,22 @@ public class MRPhoneBoothPortal : MonoBehaviour
         if (handsetAudioCue != null)
             return;
 
-        handsetAudioCue = FindHandsetAudioCueSource();
+        handsetAudioCue = FindChildAudioSource(HandsetAudioCueObjectName);
     }
 
-    AudioSource FindHandsetAudioCueSource()
+    void EnsureSpaceshipEngineAudio()
+    {
+        if (spaceshipEngineAudio != null)
+            return;
+
+        spaceshipEngineAudio = FindChildAudioSource(SpaceshipEngineAudioObjectName);
+    }
+
+    AudioSource FindChildAudioSource(string objectName)
     {
         foreach (Transform child in GetComponentsInChildren<Transform>(true))
         {
-            if (child.name != HandsetAudioCueObjectName)
+            if (child.name != objectName)
                 continue;
 
             AudioSource source = child.GetComponent<AudioSource>();
@@ -446,28 +458,48 @@ public class MRPhoneBoothPortal : MonoBehaviour
     IEnumerator PlayHandsetAudioCueAndWait()
     {
         EnsureHandsetAudioCue();
-        if (handsetAudioCue == null || handsetAudioCue.clip == null)
+        yield return PlayAudioSourceAndWait(handsetAudioCue, HandsetAudioCueObjectName);
+    }
+
+    IEnumerator PlaySpaceshipEngineAndWait()
+    {
+        EnsureSpaceshipEngineAudio();
+        if (spaceshipEngineAudio == null || spaceshipEngineAudio.clip == null)
         {
             ConfigManager.WriteConsoleWarning(
-                $"{LogPrefix} AudioCue missing or has no clip — skipping pre-travel audio");
+                $"{LogPrefix} {SpaceshipEngineAudioObjectName} missing or has no clip — fallback travel wait");
+            float duration = Mathf.Max(1f, travelDurationSeconds);
+            yield return new WaitForSecondsRealtime(duration);
             yield break;
         }
 
-        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"AudioCue play clip={handsetAudioCue.clip.name}");
-        handsetAudioCue.Stop();
-        handsetAudioCue.Play();
+        yield return PlayAudioSourceAndWait(spaceshipEngineAudio, SpaceshipEngineAudioObjectName);
+    }
 
-        float pitch = Mathf.Max(0.01f, Mathf.Abs(handsetAudioCue.pitch));
-        float waitSeconds = handsetAudioCue.clip.length / pitch + 0.05f;
+    IEnumerator PlayAudioSourceAndWait(AudioSource source, string objectName)
+    {
+        if (source == null || source.clip == null)
+        {
+            ConfigManager.WriteConsoleWarning(
+                $"{LogPrefix} {objectName} missing or has no clip — skipping");
+            yield break;
+        }
+
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"{objectName} play clip={source.clip.name}");
+        source.Stop();
+        source.Play();
+
+        float pitch = Mathf.Max(0.01f, Mathf.Abs(source.pitch));
+        float waitSeconds = source.clip.length / pitch + 0.05f;
         float elapsed = 0f;
 
-        while (handsetAudioCue.isPlaying && elapsed < waitSeconds)
+        while (source.isPlaying && elapsed < waitSeconds)
         {
             elapsed += Time.unscaledDeltaTime;
             yield return null;
         }
 
-        MRTransitionLog.LogStep("MRPhoneBoothPortal", "AudioCue finished");
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"{objectName} finished");
     }
 
     float ComputeLowestWorldY()
