@@ -14193,7 +14193,8 @@ PrefabInstance:
       value: PF_Payphone
       objectReference: {fileID: 0}
     m_RemovedComponents: []
-    m_RemovedGameObjects: []
+    m_RemovedGameObjects:
+    - {fileID: 6083898901041443078, guid: 24985c4a791f0434cb08c563ef072abf, type: 3}
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 24985c4a791f0434cb08c563ef072abf, type: 3}

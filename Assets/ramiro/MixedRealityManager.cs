@@ -474,6 +474,8 @@ public class MixedRealityManager : MonoBehaviour
         if (!IsTransitionCurrent(generation))
             yield break;
 
+        MRPhoneBoothExteriorSidewalk.SetSidewalk8Active(true);
+
         MRPhoneBoothPortal scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
         ApplyPhoneBoothTravelState(scenePortal, travelState);
         PayphoneHandsetGrab.FinalizeForVrSceneReturn(travelerPortal, scenePortal, handsetPlan);

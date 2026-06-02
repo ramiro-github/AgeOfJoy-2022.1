@@ -34,6 +34,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     bool travelInProgress;
     bool handsetGrabbed;
     PhoneBoothTravelState pendingTravelState;
+    PhoneBoothJourneyDirection currentJourneyDirection;
     Coroutine travelCoroutine;
     MRPhoneBoothTravelVfx travelVfx;
 
@@ -64,8 +65,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
     void OnDisable()
     {
-        if (travelVfx != null)
-            travelVfx.EndJourneyVisuals();
+        if (travelVfx != null && travelVfx.IsJourneyActive)
+            travelVfx.EndJourneyVisuals(currentJourneyDirection);
     }
 
     public PhoneBoothTravelState CaptureTravelState()
@@ -120,6 +121,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         }
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "BeginTravelToMR");
+        currentJourneyDirection = PhoneBoothJourneyDirection.ToMR;
         travelCoroutine = StartCoroutine(PlayTravelThen(() =>
             MixedRealityManager.Instance.EnterMRFromPhoneBooth(this)));
     }
@@ -149,6 +151,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         }
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "BeginTravelToVR");
+        currentJourneyDirection = PhoneBoothJourneyDirection.ToVR;
         travelCoroutine = StartCoroutine(PlayTravelThen(() =>
             MixedRealityManager.Instance.EnterVRFromPhoneBooth(this)));
     }
@@ -422,7 +425,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         yield return PlayHandsetAudioCueAndWait();
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey start (spaceship engine)");
-        travelVfx?.BeginJourneyVisuals();
+        travelVfx?.BeginJourneyVisuals(currentJourneyDirection);
 
         var fadeSphere = GameObject.Find("SM_FadeSphere");
         Animator fadeAnimator = fadeSphere != null ? fadeSphere.GetComponent<Animator>() : null;
@@ -431,7 +434,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         yield return PlaySpaceshipEngineAndWait();
 
-        travelVfx?.EndJourneyVisuals();
+        travelVfx?.EndJourneyVisuals(currentJourneyDirection);
 
         travelInProgress = false;
         travelCoroutine = null;

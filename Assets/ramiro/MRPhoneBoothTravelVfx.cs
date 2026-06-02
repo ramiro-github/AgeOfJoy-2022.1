@@ -15,6 +15,7 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     const string LogPrefix = "[MRPhoneBoothTravelVfx]";
     const string LegacyVfxRootName = "VFX_Travel_Runtime";
     const string PayphoneMeshObjectName = "SM_PayPhone";
+    const string DoorPhoneboothObjectName = "DoorPhonebooth";
     const string PhoneBoothLightMaterialName = "M_PhoneBooth_Light";
     const string PhoneBoothGlassMaterialName = "M_PhoneBooth_Glass";
 
@@ -29,16 +30,19 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     [Header("M_PhoneBooth_Light glow")]
     [SerializeField] float travelGlowMin = 5f;
 
-    [Header("Cabinet shake (visual mesh only — not the booth root)")]
+    [Header("Travel door (optional)")]
+    [Tooltip("DoorPhonebooth child on PF_Payphone — off in prefab, on during journey.")]
+    [SerializeField] GameObject doorPhonebooth;
+
+    [Header("Cabinet shake (SM_PayPhone + DoorPhonebooth, not booth root)")]
     [SerializeField] Transform shakeTransform;
     [SerializeField] float shakePositionAmplitude = 0.012f;
     [SerializeField] float shakeRotationAmplitude = 0.25f;
     [SerializeField] float shakeFrequency = 11f;
 
     bool journeyActive;
+    PhoneBoothJourneyDirection activeJourneyDirection;
     Coroutine shakeCoroutine;
-    Vector3 shakeBaseLocalPosition;
-    Quaternion shakeBaseLocalRotation;
 
     MaterialPropertyBlock materialPropertyBlock;
     readonly List<MaterialSlotTarget> glowMaterialTargets = new List<MaterialSlotTarget>();
@@ -60,6 +64,15 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         public float DefaultMrAmount;
     }
 
+    struct ShakeTargetState
+    {
+        public Transform Transform;
+        public Vector3 BaseLocalPosition;
+        public Quaternion BaseLocalRotation;
+    }
+
+    readonly List<ShakeTargetState> shakeTargets = new List<ShakeTargetState>();
+
     public bool IsJourneyActive => journeyActive;
 
     void Awake()
@@ -69,23 +82,28 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         CacheMaterialTargets();
     }
 
-    public void BeginJourneyVisuals()
+    public void BeginJourneyVisuals(PhoneBoothJourneyDirection direction)
     {
         if (journeyActive)
             return;
 
         journeyActive = true;
+        activeJourneyDirection = direction;
         CacheMaterialTargets();
         ApplyPhoneBoothTravelGlow();
         ApplyPhoneBoothOpaqueGlass();
+        SetDoorPhoneboothActive(true);
         StartCabinetShake();
 
+        if (direction == PhoneBoothJourneyDirection.ToMR)
+            MRPhoneBoothExteriorSidewalk.SetSidewalk8Active(false);
+
         ConfigManager.WriteConsole(
-            $"{LogPrefix} journey ON glow={glowMaterialTargets.Count} glass={glassMaterialTargets.Count} shake={GetShakeTransform().name}");
+            $"{LogPrefix} journey ON dir={direction} glow={glowMaterialTargets.Count} glass={glassMaterialTargets.Count} shakeTargets={shakeTargets.Count}");
         MRTransitionLog.LogStep("MRPhoneBoothTravelVfx", "BeginJourneyVisuals");
     }
 
-    public void EndJourneyVisuals()
+    public void EndJourneyVisuals(PhoneBoothJourneyDirection direction)
     {
         if (!journeyActive)
             return;
@@ -94,8 +112,9 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         StopCabinetShake();
         RestorePhoneBoothTravelGlow();
         RestorePhoneBoothGlass();
+        SetDoorPhoneboothActive(false);
 
-        ConfigManager.WriteConsole($"{LogPrefix} journey OFF");
+        ConfigManager.WriteConsole($"{LogPrefix} journey OFF dir={direction}");
         MRTransitionLog.LogStep("MRPhoneBoothTravelVfx", "EndJourneyVisuals");
     }
 
@@ -233,9 +252,40 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
             materialPropertyBlock = new MaterialPropertyBlock();
     }
 
-    Transform GetShakeTransform()
+    GameObject ResolveDoorPhonebooth()
     {
-        if (shakeTransform != null)
+        if (doorPhonebooth != null)
+            return doorPhonebooth;
+
+        Transform directChild = transform.Find(DoorPhoneboothObjectName);
+        if (directChild != null)
+        {
+            doorPhonebooth = directChild.gameObject;
+            return doorPhonebooth;
+        }
+
+        foreach (Transform child in GetComponentsInChildren<Transform>(true))
+        {
+            if (child.name != DoorPhoneboothObjectName)
+                continue;
+
+            doorPhonebooth = child.gameObject;
+            break;
+        }
+
+        return doorPhonebooth;
+    }
+
+    void SetDoorPhoneboothActive(bool active)
+    {
+        GameObject door = ResolveDoorPhonebooth();
+        if (door != null)
+            door.SetActive(active);
+    }
+
+    Transform GetCabinetMeshShakeTransform()
+    {
+        if (shakeTransform != null && shakeTransform != transform)
             return shakeTransform;
 
         Transform meshRoot = transform.Find(PayphoneMeshObjectName);
@@ -246,20 +296,47 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         return meshRenderer != null ? meshRenderer.transform : null;
     }
 
+    void BuildShakeTargets()
+    {
+        shakeTargets.Clear();
+        TryAddShakeTarget(GetCabinetMeshShakeTransform());
+
+        GameObject door = ResolveDoorPhonebooth();
+        if (door != null)
+            TryAddShakeTarget(door.transform);
+    }
+
+    void TryAddShakeTarget(Transform target)
+    {
+        if (target == null || target == transform)
+            return;
+
+        foreach (ShakeTargetState existing in shakeTargets)
+        {
+            if (existing.Transform == target)
+                return;
+        }
+
+        shakeTargets.Add(new ShakeTargetState
+        {
+            Transform = target,
+            BaseLocalPosition = target.localPosition,
+            BaseLocalRotation = target.localRotation
+        });
+    }
+
     void StartCabinetShake()
     {
-        Transform target = GetShakeTransform();
-        if (target == null || target == transform)
+        StopCabinetShake();
+        BuildShakeTargets();
+
+        if (shakeTargets.Count == 0)
         {
             ConfigManager.WriteConsoleWarning(
-                $"{LogPrefix} shake skipped — assign SM_PayPhone mesh transform, not booth root");
+                $"{LogPrefix} shake skipped — no SM_PayPhone or DoorPhonebooth transform");
             return;
         }
 
-        StopCabinetShake();
-        shakeTransform = target;
-        shakeBaseLocalPosition = shakeTransform.localPosition;
-        shakeBaseLocalRotation = shakeTransform.localRotation;
         shakeCoroutine = StartCoroutine(CabinetShakeRoutine());
     }
 
@@ -271,31 +348,42 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
             shakeCoroutine = null;
         }
 
-        if (shakeTransform == null || shakeTransform == transform)
-            return;
+        foreach (ShakeTargetState target in shakeTargets)
+        {
+            if (target.Transform == null)
+                continue;
 
-        shakeTransform.localPosition = shakeBaseLocalPosition;
-        shakeTransform.localRotation = shakeBaseLocalRotation;
+            target.Transform.localPosition = target.BaseLocalPosition;
+            target.Transform.localRotation = target.BaseLocalRotation;
+        }
+
+        shakeTargets.Clear();
     }
 
     IEnumerator CabinetShakeRoutine()
     {
-        Transform target = shakeTransform;
         float seed = Random.Range(0f, 100f);
-        while (journeyActive && target != null)
+        while (journeyActive)
         {
             float time = Time.time * shakeFrequency;
             float nx = Mathf.PerlinNoise(seed, time) * 2f - 1f;
             float ny = Mathf.PerlinNoise(seed + 17f, time) * 2f - 1f;
             float nz = Mathf.PerlinNoise(seed + 41f, time) * 2f - 1f;
 
-            target.localPosition = shakeBaseLocalPosition
-                + new Vector3(nx, ny, nz) * shakePositionAmplitude;
-
-            target.localRotation = shakeBaseLocalRotation * Quaternion.Euler(
+            Vector3 offset = new Vector3(nx, ny, nz) * shakePositionAmplitude;
+            Vector3 euler = new Vector3(
                 nx * shakeRotationAmplitude,
                 ny * shakeRotationAmplitude,
                 nz * shakeRotationAmplitude);
+
+            foreach (ShakeTargetState target in shakeTargets)
+            {
+                if (target.Transform == null)
+                    continue;
+
+                target.Transform.localPosition = target.BaseLocalPosition + offset;
+                target.Transform.localRotation = target.BaseLocalRotation * Quaternion.Euler(euler);
+            }
 
             yield return null;
         }
@@ -304,7 +392,7 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     void OnDestroy()
     {
         if (journeyActive)
-            EndJourneyVisuals();
+            EndJourneyVisuals(activeJourneyDirection);
 
         materialPropertyBlock = null;
     }
