@@ -35,6 +35,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     bool handsetGrabbed;
     PhoneBoothTravelState pendingTravelState;
     Coroutine travelCoroutine;
+    MRPhoneBoothTravelVfx travelVfx;
 
     public static MRPhoneBoothPortal ActiveTraveler => activeTraveler;
 
@@ -53,11 +54,18 @@ public class MRPhoneBoothPortal : MonoBehaviour
         EnsureHandsetAudioCue();
         EnsureSpaceshipEngineAudio();
         EnsureExplosionAudio();
+        EnsureTravelVfx();
     }
 
     void OnEnable()
     {
         SceneManagerHook.EnsureRegistered();
+    }
+
+    void OnDisable()
+    {
+        if (travelVfx != null)
+            travelVfx.EndJourneyVisuals();
     }
 
     public PhoneBoothTravelState CaptureTravelState()
@@ -414,6 +422,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
         yield return PlayHandsetAudioCueAndWait();
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey start (spaceship engine)");
+        travelVfx?.BeginJourneyVisuals();
+
         var fadeSphere = GameObject.Find("SM_FadeSphere");
         Animator fadeAnimator = fadeSphere != null ? fadeSphere.GetComponent<Animator>() : null;
         if (fadeAnimator != null)
@@ -421,11 +431,23 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         yield return PlaySpaceshipEngineAndWait();
 
+        travelVfx?.EndJourneyVisuals();
+
         travelInProgress = false;
         travelCoroutine = null;
         handsetGrabbed = false;
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect end");
         onComplete?.Invoke();
+    }
+
+    void EnsureTravelVfx()
+    {
+        if (travelVfx != null)
+            return;
+
+        travelVfx = GetComponent<MRPhoneBoothTravelVfx>();
+        if (travelVfx == null)
+            travelVfx = gameObject.AddComponent<MRPhoneBoothTravelVfx>();
     }
 
     void EnsureHandsetAudioCue()
