@@ -319,6 +319,35 @@ public class MixedRealityManager : MonoBehaviour
 
     bool IsTransitionCurrent(int generation) => generation == transitionGeneration;
 
+    /// <summary>Blackout, unload VR additive scenes, then enable passthrough (avoids VR flash over passthrough).</summary>
+    IEnumerator UnloadVrScenesUnderBlackoutThenPassthrough(int generation)
+    {
+        MRTransitionLog.LogStep("UnloadVrThenPassthrough", "blackout begin");
+        passthrough.BeginTransitionBlackout();
+
+        MRTransitionLog.LogStep("UnloadVrThenPassthrough", "before UnloadVrScenes");
+        yield return sceneTransition.UnloadVrScenes();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        yield return null;
+        yield return new WaitForEndOfFrame();
+
+        MRTransitionLog.LogScenes("UnloadVrThenPassthrough-after-unload");
+        MRTransitionLog.LogStep("UnloadVrThenPassthrough", "before EnablePassthroughWhenReady");
+        yield return passthrough.EnablePassthroughWhenReady();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        MRTransitionLog.LogPassthrough("UnloadVrThenPassthrough-after-passthrough", passthrough);
+        if (!passthrough.PassthroughSystemReady)
+        {
+            MRTransitionLog.LogError("EnterMR aborted — passthrough system not ready");
+            ConfigManager.WriteConsoleError($"{LogPrefix} EnterMR aborted — passthrough system not ready");
+            yield break;
+        }
+    }
+
     IEnumerator EnterMRCoroutine()
     {
         int generation = transitionGeneration;
@@ -338,25 +367,9 @@ public class MixedRealityManager : MonoBehaviour
         MRTransitionLog.LogStep("EnterMRCoroutine", "before SuspendForMR");
         MRVrSystemsGate.SuspendForMR();
 
-        MRTransitionLog.LogStep("EnterMRCoroutine", "before EnablePassthroughWhenReady");
-        yield return passthrough.EnablePassthroughWhenReady();
+        yield return UnloadVrScenesUnderBlackoutThenPassthrough(generation);
         if (!IsTransitionCurrent(generation))
             yield break;
-
-        MRTransitionLog.LogPassthrough("EnterMRCoroutine-after-passthrough", passthrough);
-        if (!passthrough.PassthroughSystemReady)
-        {
-            MRTransitionLog.LogError("EnterMR aborted — passthrough system not ready");
-            ConfigManager.WriteConsoleError($"{LogPrefix} EnterMR aborted — passthrough system not ready");
-            yield break;
-        }
-
-        MRTransitionLog.LogStep("EnterMRCoroutine", "before UnloadVrScenes");
-        yield return sceneTransition.UnloadVrScenes();
-        if (!IsTransitionCurrent(generation))
-            yield break;
-
-        MRTransitionLog.LogScenes("EnterMRCoroutine-after-unload");
 
         DestroyMRSpaceOrigin();
         RestoreMrPlayerPose();
@@ -409,20 +422,13 @@ public class MixedRealityManager : MonoBehaviour
         MRRoomInfoUI.Instance?.RefreshContent();
         MRVrSystemsGate.SuspendForMR();
 
-        yield return passthrough.EnablePassthroughWhenReady();
-        if (!IsTransitionCurrent(generation))
-            yield break;
-
-        if (!passthrough.PassthroughSystemReady)
-        {
-            MRTransitionLog.LogError("EnterMRFromPhoneBooth aborted — passthrough system not ready");
-            yield break;
-        }
-
         MRPhoneBoothPortal.AdoptAsTraveler(portal, transform);
-        yield return sceneTransition.UnloadVrScenes();
+
+        yield return UnloadVrScenesUnderBlackoutThenPassthrough(generation);
         if (!IsTransitionCurrent(generation))
             yield break;
+
+        RestorePhoneBoothTravelGlass(portal);
 
         DestroyMRSpaceOrigin();
         EnsureMRSpaceOrigin();
@@ -450,11 +456,12 @@ public class MixedRealityManager : MonoBehaviour
         ApplyPhoneBoothTravelState(portal, travelState);
         MRPhoneBoothSettings.SetVisible(true);
         portal.SetVisible(true);
-        portal.NotifyHandsetsTravelComplete();
 
         yield return portal.PlayTravelArrivalExplosionAndWait();
         if (!IsTransitionCurrent(generation))
             yield break;
+
+        portal.NotifyHandsetsTravelComplete();
 
         MRTransitionLog.LogManagerState("EnterMRFromPhoneBoothCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterMRFromPhoneBooth done");
@@ -496,6 +503,8 @@ public class MixedRealityManager : MonoBehaviour
         if (!IsTransitionCurrent(generation))
             yield break;
 
+        scenePortal?.NotifyHandsetsTravelComplete();
+
         passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
         ResetLegacyPassthroughFlags();
         SetMode(ExperienceMode.VR);
@@ -533,6 +542,15 @@ public class MixedRealityManager : MonoBehaviour
             return;
 
         portal.ApplyTravelState(state);
+    }
+
+    static void RestorePhoneBoothTravelGlass(MRPhoneBoothPortal portal)
+    {
+        if (portal == null)
+            return;
+
+        MRPhoneBoothTravelVfx travelVfx = portal.GetComponent<MRPhoneBoothTravelVfx>();
+        travelVfx?.RestoreGlassAfterMrTransition();
     }
 
     IEnumerator RefreshMrPosesWhenReady(int generation, Transform player)

@@ -702,17 +702,48 @@ public class PayphoneHandsetGrab : MonoBehaviour
             CaptureHomePose();
     }
 
-    /// <summary>After immersive travel — refresh cradle reference only; handset returns on release, not here.</summary>
+    /// <summary>After immersive travel — release from hand and snap handset back to the cradle.</summary>
     public void NotifyBoothTravelComplete()
     {
+        ForceReleaseAndReturnToCradleAfterTravel();
+    }
+
+    /// <summary>Ends XR/virtual grab and returns the handset to PF_Grabbable_Phone (used when travel finishes).</summary>
+    public void ForceReleaseAndReturnToCradleAfterTravel()
+    {
         EnsurePhoneBoothPortal();
+        ForceEndXrSelection();
+
+        isGrabbed = false;
+        virtualGrabFromTravel = false;
+        followTransform = null;
+        ShowPlayerHandsAfterRelease();
         RefreshCradleHomeFromHierarchy();
 
-        if (isGrabbed || virtualGrabFromTravel)
+        if (snapHomeWhenReadyCoroutine != null)
+        {
+            StopCoroutine(snapHomeWhenReadyCoroutine);
+            snapHomeWhenReadyCoroutine = null;
+        }
+
+        if (grabRoot == null)
             return;
 
-        if (grabRoot != null && homeParent != null && grabRoot.parent == homeParent)
-            CaptureHomePose();
+        ReturnHandsetToCradle();
+        Log("force release after travel — returned to cradle");
+    }
+
+    void ForceEndXrSelection()
+    {
+        if (grabInteractable == null || !grabInteractable.isSelected)
+            return;
+
+        if (grabInteractable.interactorsSelecting.Count == 0
+            || grabInteractable.interactionManager == null)
+            return;
+
+        IXRSelectInteractor interactor = grabInteractable.interactorsSelecting[0];
+        grabInteractable.interactionManager.SelectExit(interactor, grabInteractable);
     }
 
     /// <summary>Removes handset objects orphaned at the scene root after MR booth travel.</summary>
@@ -954,21 +985,9 @@ public class PayphoneHandsetGrab : MonoBehaviour
 
         sceneGrab.BindToScenePortal(scenePortal);
 
-        if (plan.ContinueGrab)
-        {
-            if (travelerGrab != null)
-                travelerGrab.MarkHandHideTransferred();
-
-            sceneGrab.ApplyTravelerSnapshot(plan.Snapshot, forceContinueGrab: true);
-            MRPhoneBoothPortal.DestroyTravelerInstance(restoreHiddenHands: false);
-            sceneGrab.RefreshHandHideIfGrabbed();
-        }
-        else
-        {
-            PayphoneHandsetGrab.ReleaseAllHiddenHandVisuals();
-            MRPhoneBoothPortal.DestroyTravelerInstance();
-            sceneGrab.NotifyBoothTravelComplete();
-        }
+        PayphoneHandsetGrab.ReleaseAllHiddenHandVisuals();
+        MRPhoneBoothPortal.DestroyTravelerInstance();
+        sceneGrab.ForceReleaseAndReturnToCradleAfterTravel();
     }
 
     static PayphoneHandsetGrab FindGrabOnPortal(MRPhoneBoothPortal portal)

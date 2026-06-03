@@ -14,6 +14,7 @@ public class MRPassthroughController : MonoBehaviour
     const float SystemInitTimeoutSeconds = 10f;
     const float LayerReadyTimeoutSeconds = 5f;
     const string FadeSphereName = "SM_FadeSphere";
+    const string FadeInTrigger = "FadeInTrigger";
     const string FadeOutTrigger = "FadeOutTrigger";
 
     OVRPassthroughLayer passthroughLayer;
@@ -81,6 +82,30 @@ public class MRPassthroughController : MonoBehaviour
             insightPassthroughEnabledBeforeMr = OVRManager.instance.isInsightPassthroughEnabled;
 
         ConfigManager.WriteConsole($"{LogPrefix} initialized on {xrCamera.name}, layerType={savedOverlayType}");
+    }
+
+    /// <summary>Full-screen black while VR scenes unload — call before UnloadVrScenes, then EnablePassthroughWhenReady.</summary>
+    public void BeginTransitionBlackout()
+    {
+        if (!initialized)
+            Initialize();
+
+        RebindXRCamera(createPassthroughLayerIfMissing: false);
+        RestoreFadeSphereVisuals();
+        RefreshFadeSphereAnimator();
+
+        if (fadeSphereAnimator != null)
+            fadeSphereAnimator.SetTrigger(FadeInTrigger);
+
+        if (xrCamera != null)
+        {
+            xrCamera.clearFlags = CameraClearFlags.SolidColor;
+            xrCamera.backgroundColor = Color.black;
+        }
+
+        EnsureInsightPassthroughEnabled();
+        MRTransitionLog.LogStep("MRPassthroughController", "BeginTransitionBlackout");
+        ConfigManager.WriteConsole($"{LogPrefix} transition blackout ON");
     }
 
     public IEnumerator EnablePassthroughWhenReady()
@@ -237,9 +262,18 @@ public class MRPassthroughController : MonoBehaviour
             EventManager.Instance.IsPassthrough = true;
 
         if (fadeSphereAnimator != null)
-            fadeSphereAnimator.SetTrigger("FadeInTrigger");
+            fadeSphereAnimator.SetTrigger(FadeOutTrigger);
 
         ConfigManager.WriteConsole($"{LogPrefix} passthrough ON (underlay, hands on top)");
+    }
+
+    void RefreshFadeSphereAnimator()
+    {
+        var fadeSphere = GameObject.Find(FadeSphereName);
+        if (fadeSphere == null)
+            return;
+
+        fadeSphereAnimator = fadeSphere.GetComponent<Animator>();
     }
 
     IEnumerator WaitForPassthroughSystemReady()
