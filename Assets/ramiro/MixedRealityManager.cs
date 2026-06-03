@@ -104,6 +104,15 @@ public class MixedRealityManager : MonoBehaviour
 
     public bool TransitionInProgress => transitionInProgress;
 
+    /// <summary>MR→VR phone booth travel — turn off passthrough before opaque cabin VFX.</summary>
+    public void DisablePassthroughForPhoneBoothTravel()
+    {
+        if (!IsMrEnvironmentActive())
+            return;
+
+        passthrough?.DisablePassthrough(playFadeOut: false);
+    }
+
     /// <summary>True when MR visuals/content are active (uses runtime state, not only CurrentMode).</summary>
     public bool IsMrEnvironmentActive()
     {

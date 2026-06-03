@@ -91,6 +91,9 @@ public class MRPhoneBoothPortal : MonoBehaviour
     /// <summary>Called by PayphoneHandsetGrab when the handset is grabbed.</summary>
     public void NotifyHandsetGrabbedForTravel()
     {
+        if (TryDelegateHandsetTravelToMrTraveler())
+            return;
+
         handsetGrabbed = true;
         ConfigManager.WriteConsole($"{LogPrefix} handset grabbed — trying travel mode={MixedRealityManager.Instance?.CurrentMode}");
         TryStartTravelFromHandset();
@@ -379,8 +382,30 @@ public class MRPhoneBoothPortal : MonoBehaviour
         relay.Portal = this;
     }
 
+    bool TryDelegateHandsetTravelToMrTraveler()
+    {
+        if (isTravelerInstance)
+            return false;
+
+        MixedRealityManager manager = MixedRealityManager.Instance;
+        if (manager == null || !manager.IsMrEnvironmentActive())
+            return false;
+
+        MRPhoneBoothPortal traveler = FindMrTravelerInstance(includeInactive: true);
+        if (traveler == null || traveler == this)
+            return false;
+
+        ConfigManager.WriteConsole(
+            $"{LogPrefix} delegating handset travel from scene booth '{name}' to traveler '{traveler.name}'");
+        traveler.NotifyHandsetGrabbedForTravel();
+        return true;
+    }
+
     void TryStartTravelFromHandset()
     {
+        if (TryDelegateHandsetTravelToMrTraveler())
+            return;
+
         if (travelInProgress)
         {
             ConfigManager.WriteConsoleWarning($"{LogPrefix} travel ignored — already in progress");
@@ -420,6 +445,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     IEnumerator PlayTravelThen(System.Action onComplete)
     {
         travelInProgress = true;
+        EnsureTravelVfx();
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect start");
 
         yield return PlayHandsetAudioCueAndWait();

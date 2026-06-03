@@ -64,6 +64,13 @@ public class PayphoneHandsetGrab : MonoBehaviour
 
     void EnsurePhoneBoothPortal()
     {
+        MRPhoneBoothPortal mrTraveler = ResolveMrTravelerPortal();
+        if (mrTraveler != null)
+        {
+            phoneBoothPortal = mrTraveler;
+            return;
+        }
+
         MRPhoneBoothPortal scenePortal = ResolveScenePortalFromHierarchy();
         if (scenePortal != null)
         {
@@ -71,23 +78,21 @@ public class PayphoneHandsetGrab : MonoBehaviour
             return;
         }
 
-        if (MixedRealityManager.Instance != null
-            && MixedRealityManager.Instance.IsMrEnvironmentActive()
-            && MRPhoneBoothPortal.ActiveTraveler != null)
-        {
-            phoneBoothPortal = MRPhoneBoothPortal.ActiveTraveler;
-            return;
-        }
-
-        if (phoneBoothPortal != null && !phoneBoothPortal.IsTravelerInstance)
-            return;
-
         phoneBoothPortal = ResolvePhoneBoothPortalInHierarchy();
         if (phoneBoothPortal == null)
             phoneBoothPortal = MRPhoneBoothPortal.FindSceneBoothPortal();
 
         if (phoneBoothPortal == null)
             ConfigManager.WriteConsoleWarning($"{LogPrefix} MRPhoneBoothPortal not found on {name}");
+    }
+
+    static MRPhoneBoothPortal ResolveMrTravelerPortal()
+    {
+        MixedRealityManager manager = MixedRealityManager.Instance;
+        if (manager == null || !manager.IsMrEnvironmentActive())
+            return null;
+
+        return MRPhoneBoothPortal.FindMrTravelerInstance(includeInactive: true);
     }
 
     MRPhoneBoothPortal ResolveScenePortalFromHierarchy()
@@ -408,8 +413,7 @@ public class PayphoneHandsetGrab : MonoBehaviour
         virtualGrabFromTravel = false;
         EnsureNotStatic();
 
-        if (phoneBoothPortal == null)
-            EnsurePhoneBoothPortal();
+        EnsurePhoneBoothPortal();
 
         NotifyPhoneBoothPortalTravel();
         DetachFromCradleForGrab();

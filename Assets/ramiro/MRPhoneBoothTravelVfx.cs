@@ -18,14 +18,15 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     const string DoorPhoneboothObjectName = "DoorPhonebooth";
     const string PhoneBoothLightMaterialName = "M_PhoneBooth_Light";
     const string PhoneBoothGlassMaterialName = "M_PhoneBooth_Glass";
+    const string TravelOpaqueGlassResourcePath = "Decoration/PhoneBooth/M_PhoneBooth_Glass_Opaque";
 
     static readonly int GlowMinId = Shader.PropertyToID("_GlowMin");
-    static readonly int GlassOpacityId = Shader.PropertyToID("_Opacity");
-    static readonly int GlassMrAmountId = Shader.PropertyToID("_MRAmount");
+    static readonly int GlassColorId = Shader.PropertyToID("_GlassColor");
+    static readonly int ColorId = Shader.PropertyToID("_Color");
 
-    [Header("Glass (opaque during travel)")]
-    [SerializeField] float travelGlassOpacity = 1f;
-    [SerializeField] float travelGlassMrAmount = 0f;
+    [Header("Opaque travel glass")]
+    [Tooltip("Multiplies booth glass tint — lower = darker opaque panels during travel.")]
+    [SerializeField] [Range(0.02f, 1f)] float travelGlassBrightness = 0.15f;
 
     [Header("M_PhoneBooth_Light glow")]
     [SerializeField] float travelGlowMin = 5f;
@@ -45,10 +46,10 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     Coroutine shakeCoroutine;
 
     MaterialPropertyBlock materialPropertyBlock;
+    Material travelOpaqueGlassMaterial;
     readonly List<MaterialSlotTarget> glowMaterialTargets = new List<MaterialSlotTarget>();
-    readonly List<MaterialSlotTarget> glassMaterialTargets = new List<MaterialSlotTarget>();
     readonly List<GlassMaterialSnapshot> glassMaterialSnapshots = new List<GlassMaterialSnapshot>();
-    bool materialTargetsCached;
+    readonly List<ShakeTargetState> shakeTargets = new List<ShakeTargetState>();
 
     struct MaterialSlotTarget
     {
@@ -60,8 +61,7 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     {
         public Renderer Renderer;
         public int MaterialIndex;
-        public float DefaultOpacity;
-        public float DefaultMrAmount;
+        public Material OriginalSharedMaterial;
     }
 
     struct ShakeTargetState
@@ -71,15 +71,12 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         public Quaternion BaseLocalRotation;
     }
 
-    readonly List<ShakeTargetState> shakeTargets = new List<ShakeTargetState>();
-
     public bool IsJourneyActive => journeyActive;
 
     void Awake()
     {
         RemoveLegacyRuntimeVfx();
         RemoveScriptSpawnedLights();
-        CacheMaterialTargets();
     }
 
     public void BeginJourneyVisuals(PhoneBoothJourneyDirection direction)
@@ -89,17 +86,21 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
 
         journeyActive = true;
         activeJourneyDirection = direction;
+        SetDoorPhoneboothActive(true);
         CacheMaterialTargets();
+
+        if (direction == PhoneBoothJourneyDirection.ToVR)
+            MixedRealityManager.Instance?.DisablePassthroughForPhoneBoothTravel();
+
         ApplyPhoneBoothTravelGlow();
         ApplyPhoneBoothOpaqueGlass();
-        SetDoorPhoneboothActive(true);
         StartCabinetShake();
 
         if (direction == PhoneBoothJourneyDirection.ToMR)
             MRPhoneBoothExteriorSidewalk.SetSidewalk8Active(false);
 
         ConfigManager.WriteConsole(
-            $"{LogPrefix} journey ON dir={direction} glow={glowMaterialTargets.Count} glass={glassMaterialTargets.Count} shakeTargets={shakeTargets.Count}");
+            $"{LogPrefix} journey ON dir={direction} glow={glowMaterialTargets.Count} glass={glassMaterialSnapshots.Count} shakeTargets={shakeTargets.Count}");
         MRTransitionLog.LogStep("MRPhoneBoothTravelVfx", "BeginJourneyVisuals");
     }
 
@@ -111,7 +112,10 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         journeyActive = false;
         StopCabinetShake();
         RestorePhoneBoothTravelGlow();
-        RestorePhoneBoothGlass();
+
+        if (direction != PhoneBoothJourneyDirection.ToVR)
+            RestorePhoneBoothGlass();
+
         SetDoorPhoneboothActive(false);
 
         ConfigManager.WriteConsole($"{LogPrefix} journey OFF dir={direction}");
@@ -137,7 +141,6 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     void CacheMaterialTargets()
     {
         glowMaterialTargets.Clear();
-        glassMaterialTargets.Clear();
         glassMaterialSnapshots.Clear();
 
         foreach (Renderer renderer in GetComponentsInChildren<Renderer>(true))
@@ -160,30 +163,17 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
                         MaterialIndex = i
                     });
                 }
-                else if (material.name.StartsWith(PhoneBoothGlassMaterialName))
+                else if (IsPhoneGlassMaterial(material))
                 {
-                    glassMaterialTargets.Add(new MaterialSlotTarget
-                    {
-                        Renderer = renderer,
-                        MaterialIndex = i
-                    });
-
                     glassMaterialSnapshots.Add(new GlassMaterialSnapshot
                     {
                         Renderer = renderer,
                         MaterialIndex = i,
-                        DefaultOpacity = material.HasProperty(GlassOpacityId)
-                            ? material.GetFloat(GlassOpacityId)
-                            : 0.5f,
-                        DefaultMrAmount = material.HasProperty(GlassMrAmountId)
-                            ? material.GetFloat(GlassMrAmountId)
-                            : 0f
+                        OriginalSharedMaterial = material
                     });
                 }
             }
         }
-
-        materialTargetsCached = true;
     }
 
     void ApplyPhoneBoothTravelGlow()
@@ -216,17 +206,32 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
 
     void ApplyPhoneBoothOpaqueGlass()
     {
+        if (glassMaterialSnapshots.Count == 0)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} no PhoneGlass materials found on booth");
+            return;
+        }
+
+        Material opaque = EnsureTravelOpaqueGlassMaterial();
+        if (opaque == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} opaque travel glass material unavailable");
+            return;
+        }
+
+        opaque.SetColor(GlassColorId, ResolveTravelGlassColor());
+
         foreach (GlassMaterialSnapshot snapshot in glassMaterialSnapshots)
         {
-            if (snapshot.Renderer == null)
+            if (snapshot.Renderer == null || snapshot.OriginalSharedMaterial == null)
                 continue;
 
-            Material material = snapshot.Renderer.materials[snapshot.MaterialIndex];
-            if (!material.HasProperty(GlassOpacityId) || !material.HasProperty(GlassMrAmountId))
+            Material[] materials = snapshot.Renderer.materials;
+            if (snapshot.MaterialIndex < 0 || snapshot.MaterialIndex >= materials.Length)
                 continue;
 
-            material.SetFloat(GlassOpacityId, travelGlassOpacity);
-            material.SetFloat(GlassMrAmountId, travelGlassMrAmount);
+            materials[snapshot.MaterialIndex] = opaque;
+            snapshot.Renderer.materials = materials;
         }
     }
 
@@ -234,16 +239,70 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     {
         foreach (GlassMaterialSnapshot snapshot in glassMaterialSnapshots)
         {
-            if (snapshot.Renderer == null)
+            if (snapshot.Renderer == null || snapshot.OriginalSharedMaterial == null)
                 continue;
 
-            Material material = snapshot.Renderer.materials[snapshot.MaterialIndex];
-            if (!material.HasProperty(GlassOpacityId) || !material.HasProperty(GlassMrAmountId))
+            Material[] materials = snapshot.Renderer.materials;
+            if (snapshot.MaterialIndex < 0 || snapshot.MaterialIndex >= materials.Length)
                 continue;
 
-            material.SetFloat(GlassOpacityId, snapshot.DefaultOpacity);
-            material.SetFloat(GlassMrAmountId, snapshot.DefaultMrAmount);
+            materials[snapshot.MaterialIndex] = snapshot.OriginalSharedMaterial;
+            snapshot.Renderer.materials = materials;
         }
+    }
+
+    Material EnsureTravelOpaqueGlassMaterial()
+    {
+        if (travelOpaqueGlassMaterial != null)
+            return travelOpaqueGlassMaterial;
+
+        Material template = Resources.Load<Material>(TravelOpaqueGlassResourcePath);
+        if (template == null)
+        {
+            ConfigManager.WriteConsoleError($"{LogPrefix} missing Resources/{TravelOpaqueGlassResourcePath}");
+            return null;
+        }
+
+        travelOpaqueGlassMaterial = new Material(template) { name = "M_PhoneBooth_Glass_TravelOpaque" };
+        return travelOpaqueGlassMaterial;
+    }
+
+    Color ResolveTravelGlassColor()
+    {
+        Color tint = new Color(0.9150943f, 0.8989999f, 0.4287706f, 1f);
+        foreach (GlassMaterialSnapshot snapshot in glassMaterialSnapshots)
+        {
+            Material source = snapshot.OriginalSharedMaterial;
+            if (source == null)
+                continue;
+
+            if (source.HasProperty(GlassColorId))
+            {
+                tint = source.GetColor(GlassColorId);
+                break;
+            }
+
+            if (source.HasProperty(ColorId))
+            {
+                tint = source.GetColor(ColorId);
+                break;
+            }
+        }
+
+        float brightness = Mathf.Clamp(travelGlassBrightness, 0.02f, 1f);
+        return new Color(tint.r * brightness, tint.g * brightness, tint.b * brightness, 1f);
+    }
+
+    static bool IsPhoneGlassMaterial(Material material)
+    {
+        if (material == null)
+            return false;
+
+        Shader shader = material.shader;
+        if (shader != null && shader.name.Contains("PhoneGlass"))
+            return true;
+
+        return material.name.StartsWith(PhoneBoothGlassMaterialName);
     }
 
     void EnsureMaterialPropertyBlock()
@@ -393,6 +452,9 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
     {
         if (journeyActive)
             EndJourneyVisuals(activeJourneyDirection);
+
+        if (travelOpaqueGlassMaterial != null)
+            Destroy(travelOpaqueGlassMaterial);
 
         materialPropertyBlock = null;
     }
