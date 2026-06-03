@@ -348,6 +348,44 @@ public class MixedRealityManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Phone booth VR→MR: passthrough while VR scenes still loaded (Quest-safe), adopt booth, then unload under blackout.
+    /// Travel fade already black — do not retrigger FadeIn.
+    /// </summary>
+    IEnumerator EnablePassthroughAdoptBoothThenUnload(MRPhoneBoothPortal portal, int generation)
+    {
+        MRTransitionLog.LogStep("BoothEnterMR", "blackout hold (travel fade)");
+        passthrough.BeginTransitionBlackout(triggerFadeInAnimator: false, restoreFadeSphere: false);
+
+        MRTransitionLog.LogStep("BoothEnterMR", "before EnablePassthroughWhenReady");
+        yield return passthrough.EnablePassthroughWhenReady();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        if (!passthrough.PassthroughSystemReady)
+        {
+            MRTransitionLog.LogError("EnterMRFromPhoneBooth aborted — passthrough system not ready");
+            ConfigManager.WriteConsoleError($"{LogPrefix} EnterMRFromPhoneBooth aborted — passthrough system not ready");
+            yield break;
+        }
+
+        MRTransitionLog.LogPassthrough("BoothEnterMR-after-passthrough", passthrough);
+
+        MRPhoneBoothPortal.AdoptAsTraveler(portal, transform);
+
+        MRTransitionLog.LogStep("BoothEnterMR", "before UnloadVrScenes");
+        yield return sceneTransition.UnloadVrScenes();
+        if (!IsTransitionCurrent(generation))
+            yield break;
+
+        yield return null;
+        yield return new WaitForEndOfFrame();
+        MRTransitionLog.LogScenes("BoothEnterMR-after-unload");
+
+        passthrough.RefreshPassthroughAfterSceneUnload();
+        yield return null;
+    }
+
     IEnumerator EnterMRCoroutine()
     {
         int generation = transitionGeneration;
@@ -422,13 +460,14 @@ public class MixedRealityManager : MonoBehaviour
         MRRoomInfoUI.Instance?.RefreshContent();
         MRVrSystemsGate.SuspendForMR();
 
-        MRPhoneBoothPortal.AdoptAsTraveler(portal, transform);
-
-        yield return UnloadVrScenesUnderBlackoutThenPassthrough(generation);
+        yield return EnablePassthroughAdoptBoothThenUnload(portal, generation);
         if (!IsTransitionCurrent(generation))
             yield break;
 
         RestorePhoneBoothTravelGlass(portal);
+        portal.NotifyHandsetsTravelComplete();
+
+        passthrough.RefreshPassthroughAfterSceneUnload();
 
         DestroyMRSpaceOrigin();
         EnsureMRSpaceOrigin();
@@ -441,6 +480,8 @@ public class MixedRealityManager : MonoBehaviour
 
         if (environmentSurfaces != null && MRSpaceOrigin != null)
             environmentSurfaces.AlignOriginToFloor(MRSpaceOrigin, player);
+
+        passthrough.RefreshPassthroughAfterSceneUnload();
 
         SetMode(ExperienceMode.MR);
         mrLighting?.Spawn(MRSpaceOrigin);

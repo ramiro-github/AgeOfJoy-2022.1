@@ -712,6 +712,13 @@ public class PayphoneHandsetGrab : MonoBehaviour
     public void ForceReleaseAndReturnToCradleAfterTravel()
     {
         EnsurePhoneBoothPortal();
+
+        if (snapHomeWhenReadyCoroutine != null)
+        {
+            StopCoroutine(snapHomeWhenReadyCoroutine);
+            snapHomeWhenReadyCoroutine = null;
+        }
+
         ForceEndXrSelection();
 
         isGrabbed = false;
@@ -719,12 +726,6 @@ public class PayphoneHandsetGrab : MonoBehaviour
         followTransform = null;
         ShowPlayerHandsAfterRelease();
         RefreshCradleHomeFromHierarchy();
-
-        if (snapHomeWhenReadyCoroutine != null)
-        {
-            StopCoroutine(snapHomeWhenReadyCoroutine);
-            snapHomeWhenReadyCoroutine = null;
-        }
 
         if (grabRoot == null)
             return;
@@ -738,12 +739,21 @@ public class PayphoneHandsetGrab : MonoBehaviour
         if (grabInteractable == null || !grabInteractable.isSelected)
             return;
 
-        if (grabInteractable.interactorsSelecting.Count == 0
-            || grabInteractable.interactionManager == null)
+        if (grabInteractable.interactorsSelecting.Count == 0)
             return;
 
+        XRInteractionManager manager = grabInteractable.interactionManager;
+        if (manager == null)
+            manager = FindObjectOfType<XRInteractionManager>();
+
+        if (manager == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} ForceEndXrSelection skipped — no XRInteractionManager");
+            return;
+        }
+
         IXRSelectInteractor interactor = grabInteractable.interactorsSelecting[0];
-        grabInteractable.interactionManager.SelectExit(interactor, grabInteractable);
+        manager.SelectExit(interactor, grabInteractable);
     }
 
     /// <summary>Removes handset objects orphaned at the scene root after MR booth travel.</summary>
@@ -965,18 +975,21 @@ public class PayphoneHandsetGrab : MonoBehaviour
         MRPhoneBoothPortal scenePortal,
         VrReturnHandsetPlan plan)
     {
+        PayphoneHandsetGrab travelerGrab = FindGrabOnPortal(travelerPortal);
+
         if (scenePortal == null)
         {
+            travelerGrab?.ForceReleaseAndReturnToCradleAfterTravel();
             PayphoneHandsetGrab.ReleaseAllHiddenHandVisuals();
             MRPhoneBoothPortal.DestroyTravelerInstance();
             return;
         }
 
-        PayphoneHandsetGrab travelerGrab = FindGrabOnPortal(travelerPortal);
         PayphoneHandsetGrab sceneGrab = EnsureSceneHandsetGrab(scenePortal);
 
         if (sceneGrab == null)
         {
+            travelerGrab?.ForceReleaseAndReturnToCradleAfterTravel();
             PayphoneHandsetGrab.ReleaseAllHiddenHandVisuals();
             MRPhoneBoothPortal.DestroyTravelerInstance();
             ConfigManager.WriteConsoleWarning($"{LogPrefix} no scene handset grab on '{scenePortal.name}'");
@@ -985,6 +998,8 @@ public class PayphoneHandsetGrab : MonoBehaviour
 
         sceneGrab.BindToScenePortal(scenePortal);
 
+        // Release XR on the MR traveler grab before the booth is destroyed.
+        travelerGrab?.ForceReleaseAndReturnToCradleAfterTravel();
         PayphoneHandsetGrab.ReleaseAllHiddenHandVisuals();
         MRPhoneBoothPortal.DestroyTravelerInstance();
         sceneGrab.ForceReleaseAndReturnToCradleAfterTravel();

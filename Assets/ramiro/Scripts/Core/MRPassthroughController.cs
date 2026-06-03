@@ -85,16 +85,17 @@ public class MRPassthroughController : MonoBehaviour
     }
 
     /// <summary>Full-screen black while VR scenes unload — call before UnloadVrScenes, then EnablePassthroughWhenReady.</summary>
-    public void BeginTransitionBlackout()
+    public void BeginTransitionBlackout(bool triggerFadeInAnimator = true, bool restoreFadeSphere = true)
     {
         if (!initialized)
             Initialize();
 
         RebindXRCamera(createPassthroughLayerIfMissing: false);
-        RestoreFadeSphereVisuals();
+        if (restoreFadeSphere)
+            RestoreFadeSphereVisuals();
         RefreshFadeSphereAnimator();
 
-        if (fadeSphereAnimator != null)
+        if (triggerFadeInAnimator && fadeSphereAnimator != null)
             fadeSphereAnimator.SetTrigger(FadeInTrigger);
 
         if (xrCamera != null)
@@ -179,7 +180,7 @@ public class MRPassthroughController : MonoBehaviour
             OVRManager.instance.isInsightPassthroughEnabled = false;
         }
 
-        RestoreFadeSphereVisuals();
+        RestoreFadeSphereForVr();
 
         if (playFadeOut && fadeSphereAnimator != null)
             fadeSphereAnimator.SetTrigger(FadeOutTrigger);
@@ -231,7 +232,7 @@ public class MRPassthroughController : MonoBehaviour
             passthroughLayer = xrCamera.gameObject.AddComponent<OVRPassthroughLayer>();
 
         EnsureInsightPassthroughEnabled();
-        SuppressFadeSphereVisuals();
+        ClearFadeSphereForPassthrough();
 
         if (OVRManager.instance != null)
             insightPassthroughEnabledBeforeMr = OVRManager.instance.isInsightPassthroughEnabled;
@@ -260,9 +261,6 @@ public class MRPassthroughController : MonoBehaviour
 
         if (EventManager.Instance != null)
             EventManager.Instance.IsPassthrough = true;
-
-        if (fadeSphereAnimator != null)
-            fadeSphereAnimator.SetTrigger(FadeOutTrigger);
 
         ConfigManager.WriteConsole($"{LogPrefix} passthrough ON (underlay, hands on top)");
     }
@@ -335,23 +333,58 @@ public class MRPassthroughController : MonoBehaviour
             ConfigManager.WriteConsoleWarning($"{LogPrefix} passthrough layer resume timeout ({LayerReadyTimeoutSeconds}s)");
     }
 
-    void SuppressFadeSphereVisuals()
+    /// <summary>
+    /// Hide SM_FadeSphere during MR passthrough. Do not use FadeOutTrigger — that animation
+    /// re-enables the renderer at _FadeAmount=1 (full black) for ~2s and covers passthrough.
+    /// </summary>
+    void ClearFadeSphereForPassthrough()
     {
         disabledFadeRenderers.Clear();
         var fadeSphere = GameObject.Find(FadeSphereName);
         if (fadeSphere == null)
             return;
 
+        fadeSphereAnimator = fadeSphere.GetComponent<Animator>();
+        if (fadeSphereAnimator != null)
+            fadeSphereAnimator.enabled = false;
+
         foreach (Renderer renderer in fadeSphere.GetComponentsInChildren<Renderer>(true))
         {
-            if (renderer == null || !renderer.enabled)
+            if (renderer == null)
                 continue;
+
+            Material[] materials = renderer.materials;
+            for (int i = 0; i < materials.Length; i++)
+            {
+                Material material = materials[i];
+                if (material != null && material.HasProperty("_FadeAmount"))
+                    material.SetFloat("_FadeAmount", 0f);
+            }
+
             disabledFadeRenderers.Add(renderer);
             renderer.enabled = false;
         }
 
         if (disabledFadeRenderers.Count > 0)
-            ConfigManager.WriteConsole($"{LogPrefix} disabled {disabledFadeRenderers.Count} fade sphere renderer(s)");
+            ConfigManager.WriteConsole($"{LogPrefix} cleared fade sphere for passthrough ({disabledFadeRenderers.Count} renderer(s))");
+    }
+
+    void RestoreFadeSphereForVr()
+    {
+        var fadeSphere = GameObject.Find(FadeSphereName);
+        if (fadeSphere != null)
+        {
+            fadeSphereAnimator = fadeSphere.GetComponent<Animator>();
+            if (fadeSphereAnimator != null)
+                fadeSphereAnimator.enabled = true;
+        }
+
+        RestoreFadeSphereVisuals();
+    }
+
+    void SuppressFadeSphereVisuals()
+    {
+        ClearFadeSphereForPassthrough();
     }
 
     void RestoreFadeSphereVisuals()
@@ -395,14 +428,44 @@ public class MRPassthroughController : MonoBehaviour
             OVRManager.instance.isInsightPassthroughEnabled = true;
     }
 
+    /// <summary>After additive VR scenes unload, rebind the HMD camera and restore passthrough (MainCamera tag can change).</summary>
+    public void RefreshPassthroughAfterSceneUnload()
+    {
+        if (!initialized)
+            Initialize();
+
+        RebindXRCamera(createPassthroughLayerIfMissing: true);
+        if (xrCamera == null || passthroughLayer == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} RefreshPassthroughAfterSceneUnload skipped — no XR camera/layer");
+            return;
+        }
+
+        if (!IsPassthroughRuntimeAvailable())
+            return;
+
+        if (!passthroughSystemReady && OVRManager.IsInsightPassthroughInitialized())
+            passthroughSystemReady = true;
+
+        if (!passthroughSystemReady)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} RefreshPassthroughAfterSceneUnload skipped — passthrough not ready");
+            return;
+        }
+
+        ApplyPassthroughRendering();
+        MRTransitionLog.LogStep("MRPassthroughController", "RefreshPassthroughAfterSceneUnload");
+        ConfigManager.WriteConsole($"{LogPrefix} passthrough refreshed after scene unload on {xrCamera.name}");
+    }
+
     static Camera ResolveXRCamera()
     {
-        if (Camera.main != null)
-            return Camera.main;
-
         var origin = Object.FindObjectOfType<Unity.XR.CoreUtils.XROrigin>();
         if (origin != null && origin.Camera != null)
             return origin.Camera;
+
+        if (Camera.main != null)
+            return Camera.main;
 
         var tagged = GameObject.FindGameObjectWithTag("MainCamera");
         return tagged != null ? tagged.GetComponent<Camera>() : null;
