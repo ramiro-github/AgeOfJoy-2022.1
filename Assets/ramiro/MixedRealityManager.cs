@@ -486,8 +486,15 @@ public class MixedRealityManager : MonoBehaviour
         MRPhoneBoothExteriorSidewalk.SetSidewalk8Active(true);
 
         MRPhoneBoothPortal scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+        AudioClip arrivalExplosionClip =
+            MRPhoneBoothPortal.ResolveExplosionClip(scenePortal, travelerPortal);
+
         ApplyPhoneBoothTravelState(scenePortal, travelState);
         PayphoneHandsetGrab.FinalizeForVrSceneReturn(travelerPortal, scenePortal, handsetPlan);
+
+        yield return MRPhoneBoothPortal.PlayArrivalExplosionClipAndWait(arrivalExplosionClip);
+        if (!IsTransitionCurrent(generation))
+            yield break;
 
         passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
         ResetLegacyPassthroughFlags();
@@ -514,14 +521,6 @@ public class MixedRealityManager : MonoBehaviour
 
         passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
         ResetLegacyPassthroughFlags();
-
-        MRPhoneBoothPortal arrivalPortal = scenePortal != null ? scenePortal : travelerPortal;
-        if (arrivalPortal != null)
-        {
-            yield return arrivalPortal.PlayTravelArrivalExplosionAndWait();
-            if (!IsTransitionCurrent(generation))
-                yield break;
-        }
 
         MRTransitionLog.LogManagerState("EnterVRFromPhoneBoothCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterVRFromPhoneBooth done");

@@ -543,11 +543,56 @@ public class MRPhoneBoothPortal : MonoBehaviour
     public IEnumerator PlayTravelArrivalExplosionAndWait()
     {
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey end (AudioExplosion)");
-        EnsureExplosionAudio();
-        yield return PlayAudioSourceAndWait(explosionAudio, ExplosionAudioObjectName);
+        yield return PlayArrivalExplosionClipAndWait(ResolveExplosionClip());
     }
 
-    IEnumerator PlayAudioSourceAndWait(AudioSource source, string objectName)
+    public AudioClip ResolveExplosionClip()
+    {
+        EnsureExplosionAudio();
+        return explosionAudio != null ? explosionAudio.clip : null;
+    }
+
+    public static AudioClip ResolveExplosionClip(MRPhoneBoothPortal primary, MRPhoneBoothPortal fallback)
+    {
+        AudioClip clip = primary != null ? primary.ResolveExplosionClip() : null;
+        if (clip != null)
+            return clip;
+
+        return fallback != null ? fallback.ResolveExplosionClip() : null;
+    }
+
+    /// <summary>2D one-shot — reliable after MR traveler booth is destroyed.</summary>
+    public static IEnumerator PlayArrivalExplosionClipAndWait(AudioClip clip)
+    {
+        if (clip == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} AudioExplosion clip missing — skipping");
+            yield break;
+        }
+
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"AudioExplosion play clip={clip.name}");
+        var oneShotObject = new GameObject("PhoneBoothExplosionOneShot");
+        AudioSource source = oneShotObject.AddComponent<AudioSource>();
+        source.clip = clip;
+        source.spatialBlend = 0f;
+        source.playOnAwake = false;
+        source.Play();
+
+        float pitch = Mathf.Max(0.01f, Mathf.Abs(source.pitch));
+        float waitSeconds = clip.length / pitch + 0.05f;
+        float elapsed = 0f;
+
+        while (source.isPlaying && elapsed < waitSeconds)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        Destroy(oneShotObject);
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "AudioExplosion finished");
+    }
+
+    IEnumerator PlayAudioSourceAndWait(AudioSource source, string objectName, bool force2D = false)
     {
         if (source == null || source.clip == null)
         {
@@ -556,7 +601,14 @@ public class MRPhoneBoothPortal : MonoBehaviour
             yield break;
         }
 
+        if (!source.gameObject.activeInHierarchy)
+            source.gameObject.SetActive(true);
+
         MRTransitionLog.LogStep("MRPhoneBoothPortal", $"{objectName} play clip={source.clip.name}");
+        float savedSpatialBlend = source.spatialBlend;
+        if (force2D)
+            source.spatialBlend = 0f;
+
         source.Stop();
         source.Play();
 
@@ -569,6 +621,9 @@ public class MRPhoneBoothPortal : MonoBehaviour
             elapsed += Time.unscaledDeltaTime;
             yield return null;
         }
+
+        if (force2D)
+            source.spatialBlend = savedSpatialBlend;
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", $"{objectName} finished");
     }
