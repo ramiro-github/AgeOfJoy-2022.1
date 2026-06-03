@@ -32,6 +32,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
     bool isTravelerInstance;
     int playersInside;
     bool travelInProgress;
+    bool travelPastHandsetCue;
+    bool travelCancelRequested;
     bool handsetGrabbed;
     PhoneBoothTravelState pendingTravelState;
     PhoneBoothJourneyDirection currentJourneyDirection;
@@ -47,6 +49,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     }
 
     public bool TravelInProgress => travelInProgress;
+    public bool TravelPastHandsetCue => travelPastHandsetCue;
     public bool PlayerInside => playersInside > 0;
 
     void Awake()
@@ -97,6 +100,18 @@ public class MRPhoneBoothPortal : MonoBehaviour
         handsetGrabbed = true;
         ConfigManager.WriteConsole($"{LogPrefix} handset grabbed — trying travel mode={MixedRealityManager.Instance?.CurrentMode}");
         TryStartTravelFromHandset();
+
+        if (!travelInProgress)
+            handsetGrabbed = false;
+    }
+
+    /// <summary>Handset released — cancel travel only before the first (handset) audio finishes.</summary>
+    public void NotifyHandsetReleasedDuringTravel()
+    {
+        if (!travelInProgress || travelPastHandsetCue)
+            return;
+
+        CancelTravelBeforeCommit();
     }
 
     public void BeginTravelToMR()
@@ -226,6 +241,13 @@ public class MRPhoneBoothPortal : MonoBehaviour
     /// <summary>Restore every handset on this booth after immersive travel.</summary>
     public void NotifyHandsetsTravelComplete()
     {
+        PayphoneHandsetGrab onPortal = PayphoneHandsetGrab.FindOnPortal(this);
+        if (onPortal != null)
+        {
+            onPortal.NotifyBoothTravelComplete();
+            return;
+        }
+
         PayphoneHandsetGrab[] grabs = FindObjectsOfType<PayphoneHandsetGrab>();
         foreach (PayphoneHandsetGrab grab in grabs)
         {
@@ -445,10 +467,16 @@ public class MRPhoneBoothPortal : MonoBehaviour
     IEnumerator PlayTravelThen(System.Action onComplete)
     {
         travelInProgress = true;
+        travelPastHandsetCue = false;
+        travelCancelRequested = false;
         EnsureTravelVfx();
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect start");
 
         yield return PlayHandsetAudioCueAndWait();
+        if (travelCancelRequested)
+            yield break;
+
+        travelPastHandsetCue = true;
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey start (spaceship engine)");
         travelVfx?.BeginJourneyVisuals(currentJourneyDirection);
@@ -462,11 +490,46 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         travelVfx?.EndJourneyVisuals(currentJourneyDirection);
 
-        travelInProgress = false;
-        travelCoroutine = null;
-        handsetGrabbed = false;
+        CompleteTravelSequence();
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect end");
         onComplete?.Invoke();
+    }
+
+    void CancelTravelBeforeCommit()
+    {
+        if (!travelInProgress || travelPastHandsetCue)
+            return;
+
+        travelCancelRequested = true;
+
+        if (travelCoroutine != null)
+        {
+            StopCoroutine(travelCoroutine);
+            travelCoroutine = null;
+        }
+
+        EnsureHandsetAudioCue();
+        if (handsetAudioCue != null)
+            handsetAudioCue.Stop();
+
+        if (travelVfx != null && travelVfx.IsJourneyActive)
+            travelVfx.EndJourneyVisuals(currentJourneyDirection);
+
+        travelInProgress = false;
+        travelPastHandsetCue = false;
+        handsetGrabbed = false;
+        pendingTravelState = null;
+        ConfigManager.WriteConsole($"{LogPrefix} travel cancelled — handset released before AudioCue finished");
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "CancelTravelBeforeCommit");
+    }
+
+    void CompleteTravelSequence()
+    {
+        travelInProgress = false;
+        travelPastHandsetCue = false;
+        travelCancelRequested = false;
+        travelCoroutine = null;
+        handsetGrabbed = false;
     }
 
     void EnsureTravelVfx()

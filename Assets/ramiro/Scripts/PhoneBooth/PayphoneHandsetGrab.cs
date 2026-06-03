@@ -18,6 +18,8 @@ public class PayphoneHandsetGrab : MonoBehaviour
 {
     const string LogPrefix = "[PayphoneHandsetGrab]";
     const string HandsetObjectName = "SM_Payphone_Handset";
+    const string CradleObjectName = "PF_Grabbable_Phone";
+    const string BoothObjectName = "PF_Payphone";
     static readonly string[] GrabInteractionLayers = { "InteractablePart" };
     const string GrabPhysicsLayerName = "InteractablePart";
 
@@ -395,14 +397,18 @@ public class PayphoneHandsetGrab : MonoBehaviour
         homeLocalScale = grabRoot.localScale;
     }
 
-    Transform GetBoothRootTransform()
-    {
-        EnsurePhoneBoothPortal();
-        if (phoneBoothPortal != null)
-            return phoneBoothPortal.transform;
+    Transform GetBoothRootTransform() => ResolveBoothRootFromHierarchy(grabRoot);
 
-        if (MRPhoneBoothPortal.ActiveTraveler != null)
-            return MRPhoneBoothPortal.ActiveTraveler.transform;
+    static Transform ResolveBoothRootFromHierarchy(Transform start)
+    {
+        Transform node = start;
+        while (node != null)
+        {
+            if (node.name == BoothObjectName)
+                return node;
+
+            node = node.parent;
+        }
 
         return null;
     }
@@ -524,10 +530,7 @@ public class PayphoneHandsetGrab : MonoBehaviour
 
     bool ShouldDeferHandsetReturn()
     {
-        if (MixedRealityManager.Instance != null && MixedRealityManager.Instance.TransitionInProgress)
-            return true;
-
-        return phoneBoothPortal != null && phoneBoothPortal.TravelInProgress;
+        return MixedRealityManager.Instance != null && MixedRealityManager.Instance.TransitionInProgress;
     }
 
     IEnumerator HideHandVisualsNextFrame(IXRSelectInteractor interactor)
@@ -554,6 +557,7 @@ public class PayphoneHandsetGrab : MonoBehaviour
         virtualGrabFromTravel = false;
         followTransform = null;
         ShowPlayerHandsAfterRelease();
+        RefreshCradleHomeFromHierarchy();
         QueueReturnHandsetToCradle();
     }
 
@@ -605,20 +609,32 @@ public class PayphoneHandsetGrab : MonoBehaviour
 
     void OnReleased(SelectExitEventArgs _)
     {
-        isGrabbed = false;
-        virtualGrabFromTravel = false;
-        followTransform = null;
-        ShowPlayerHandsAfterRelease();
-        QueueReturnHandsetToCradle();
+        EndGrabAndReturnToCradle();
     }
 
     void EndGrabImmediate()
+    {
+        EndGrabAndReturnToCradle();
+    }
+
+    void EndGrabAndReturnToCradle()
     {
         isGrabbed = false;
         virtualGrabFromTravel = false;
         followTransform = null;
         ShowPlayerHandsAfterRelease();
+        NotifyPhoneBoothHandsetReleased();
+        RefreshCradleHomeFromHierarchy();
         QueueReturnHandsetToCradle();
+    }
+
+    void NotifyPhoneBoothHandsetReleased()
+    {
+        MRPhoneBoothPortal portal = ResolvePhoneBoothPortalInHierarchy();
+        if (portal == null)
+            portal = phoneBoothPortal;
+
+        portal?.NotifyHandsetReleasedDuringTravel();
     }
 
     void QueueReturnHandsetToCradle()
@@ -658,38 +674,45 @@ public class PayphoneHandsetGrab : MonoBehaviour
             SnapHome();
     }
 
-    void EnsureValidHomeParent()
+    void RefreshCradleHomeFromHierarchy()
     {
-        Transform boothRoot = GetBoothRootTransform();
+        Transform boothRoot = ResolveBoothRootFromHierarchy(grabRoot);
         if (boothRoot == null)
             return;
 
-        if (homeParent != null && homeParent.IsChildOf(boothRoot))
-            return;
-
-        Transform cradle = FindDeepChild(boothRoot, "PF_Grabbable_Phone");
+        Transform cradle = FindDeepChild(boothRoot, CradleObjectName);
         if (cradle == null)
             return;
 
         homeParent = cradle;
 
+        MRPhoneBoothPortal portalOnBooth = boothRoot.GetComponent<MRPhoneBoothPortal>();
+        if (portalOnBooth != null && !portalOnBooth.IsTravelerInstance)
+            phoneBoothPortal = portalOnBooth;
+    }
+
+    void EnsureValidHomeParent()
+    {
+        RefreshCradleHomeFromHierarchy();
+
+        if (homeParent == null)
+            return;
+
         if (grabRoot != null && grabRoot.parent == homeParent)
             CaptureHomePose();
     }
 
-    /// <summary>Called after the booth finishes VR↔MR travel — refresh cradle pose and snap if loose.</summary>
+    /// <summary>After immersive travel — refresh cradle reference only; handset returns on release, not here.</summary>
     public void NotifyBoothTravelComplete()
     {
         EnsurePhoneBoothPortal();
-        EnsureValidHomeParent();
+        RefreshCradleHomeFromHierarchy();
 
-        if (isGrabbed)
+        if (isGrabbed || virtualGrabFromTravel)
             return;
 
-        if (IsAwayFromCradle())
-            ReturnHandsetToCradle();
-        else
-            RecaptureHomePose();
+        if (grabRoot != null && homeParent != null && grabRoot.parent == homeParent)
+            CaptureHomePose();
     }
 
     /// <summary>Removes handset objects orphaned at the scene root after MR booth travel.</summary>
@@ -1124,15 +1147,4 @@ public class PayphoneHandsetGrab : MonoBehaviour
         ConfigManager.WriteConsole($"{LogPrefix} {message}");
     }
 
-    public void RecaptureHomePose()
-    {
-        if (isGrabbed)
-            return;
-
-        EnsureValidHomeParent();
-        if (grabRoot != null && grabRoot.parent == homeParent)
-            CaptureHomePose();
-
-        SnapHome();
-    }
 }
