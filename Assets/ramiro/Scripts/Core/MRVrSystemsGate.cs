@@ -48,14 +48,19 @@ public static class MRVrSystemsGate
         ResumePlayerLocomotion();
     }
 
+    /// <summary>MR→VR phone booth: silence running cores and attract loops before/during immersive travel.</summary>
+    public static void SilenceAllCabinetScreensForPhoneBoothTravelToVr()
+    {
+        MRTransitionLog.LogStep("MRVrSystemsGate", "SilenceAllCabinetScreensForPhoneBoothTravelToVr");
+        ConfigManager.WriteConsole($"{LogPrefix} silence cabinet screens for phone booth MR→VR travel");
+        StopActiveLibretroGames();
+        SuspendAttractOnAllCabinetScreens();
+        MRLayoutRegistry registry = MRLayoutRegistry.Instance;
+        registry?.StopAllMrLibretroGames();
+    }
+
     public static void StopActiveLibretroGames()
     {
-        if (!LibretroMameCore.GameLoaded)
-        {
-            MRTransitionLog.Log("StopActiveLibretroGames — GameLoaded=false skip");
-            return;
-        }
-
         var screens = Object.FindObjectsOfType<LibretroScreenController>(true);
         MRTransitionLog.Log($"StopActiveLibretroGames screens={screens.Length}");
         bool ended = false;
@@ -76,6 +81,25 @@ public static class MRVrSystemsGate
         {
             MRTransitionLog.LogWarning("StopActiveLibretroGames force end — screen destroyed before End()");
             LibretroMameCore.ForceEndActiveGame();
+        }
+    }
+
+    /// <summary>After VR scenes reload — attract loops on gallery cabinets may have started.</summary>
+    public static void SilenceCabinetScreensAfterVrSceneReload()
+    {
+        MRTransitionLog.LogStep("MRVrSystemsGate", "SilenceCabinetScreensAfterVrSceneReload");
+        StopActiveLibretroGames();
+        SuspendAttractOnAllCabinetScreens();
+    }
+
+    static void SuspendAttractOnAllCabinetScreens()
+    {
+        var screens = Object.FindObjectsOfType<LibretroScreenController>(true);
+        foreach (LibretroScreenController screen in screens)
+        {
+            if (screen == null)
+                continue;
+            screen.SuspendAttractAndPlaybackForTransition();
         }
     }
 

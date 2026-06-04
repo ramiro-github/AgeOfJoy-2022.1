@@ -46,7 +46,6 @@ public static class MRPhoneBoothTransitionSequence
 
     static readonly MrToVrReturnStep[] DefaultMrToVr =
     {
-        MrToVrReturnStep.ReloadVrScenes,
         MrToVrReturnStep.CacheArrivalExplosionClip,
         MrToVrReturnStep.RestoreGalleryPlayerPose,
         MrToVrReturnStep.RefreshCameraOffset,
@@ -54,8 +53,9 @@ public static class MRPhoneBoothTransitionSequence
         MrToVrReturnStep.FinalizeHandsetOnSceneBooth,
         MrToVrReturnStep.WaitFramesBeforeArrivalEffects,
         MrToVrReturnStep.ArrivalExplosionAndSmoke,
-        MrToVrReturnStep.EnableVrModeAndLocomotion,
         MrToVrReturnStep.MrEnvironmentCleanup,
+        MrToVrReturnStep.ReloadVrScenes,
+        MrToVrReturnStep.EnableVrModeAndLocomotion,
         MrToVrReturnStep.FinalPassthroughRebind,
     };
 
@@ -113,9 +113,10 @@ public static class MRPhoneBoothTransitionSequence
             return true;
 
         int reloadIdx = IndexOf(steps, MrToVrReturnStep.ReloadVrScenes);
-        if (reloadIdx >= 0 && reloadIdx != 0)
+        int cleanupIdx = IndexOf(steps, MrToVrReturnStep.MrEnvironmentCleanup);
+        if (reloadIdx >= 0 && cleanupIdx >= 0 && reloadIdx < cleanupIdx)
         {
-            warning = "ReloadVrScenes must be first.";
+            warning = "ReloadVrScenes should run after MrEnvironmentCleanup (keeps gallery cabinet audio off during travel).";
             return false;
         }
 

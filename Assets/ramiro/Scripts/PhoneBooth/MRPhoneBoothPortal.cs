@@ -170,6 +170,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         }
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "BeginTravelToVR");
+        MRVrSystemsGate.SilenceAllCabinetScreensForPhoneBoothTravelToVr();
         currentJourneyDirection = PhoneBoothJourneyDirection.ToVR;
         travelCoroutine = StartCoroutine(PlayTravelThen(() =>
             MixedRealityManager.Instance.EnterVRFromPhoneBooth(this)));

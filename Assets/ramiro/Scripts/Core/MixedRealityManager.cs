@@ -261,7 +261,7 @@ public class MixedRealityManager : MonoBehaviour
         CancelActivePlacementRay();
         RememberMrPlayerPose();
         MRConfigurationCabinetController.Instance?.ForceCloseEdit();
-        ActiveRegistry()?.StopAllMrLibretroGames();
+        MRVrSystemsGate.SilenceAllCabinetScreensForPhoneBoothTravelToVr();
         ActiveRegistry()?.SnapshotSpawnedWorldPosesToLayout();
         ActiveEnvironmentRegistry()?.SnapshotSpawnedWorldPosesToLayout();
         MRConfigurationCabinetController.Instance?.HideForMrExit();
@@ -577,6 +577,7 @@ public class MixedRealityManager : MonoBehaviour
         {
             case MRPhoneBoothTransitionSequence.MrToVrReturnStep.ReloadVrScenes:
                 yield return sceneTransition.ReloadVrScenes();
+                MRVrSystemsGate.SilenceCabinetScreensAfterVrSceneReload();
                 break;
 
             case MRPhoneBoothTransitionSequence.MrToVrReturnStep.CacheArrivalExplosionClip:

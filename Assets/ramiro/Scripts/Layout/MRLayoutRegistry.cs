@@ -979,6 +979,7 @@ public class MRLayoutRegistry : MonoBehaviour
                 continue;
             if (LibretroMameCore.isRunning(screen.ScreenName, screen.GameFile))
                 LibretroMameCore.End(screen.ScreenName, screen.GameFile);
+            screen.SuspendAttractAndPlaybackForTransition();
         }
     }
 }

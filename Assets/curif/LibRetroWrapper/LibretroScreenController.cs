@@ -308,6 +308,22 @@ public class LibretroScreenController : MonoBehaviour
             mainCoroutine = StartCoroutine(runBT());
     }
 
+    /// <summary>Stop attract BT and clip playback during MR phone-booth travel (game End is separate).</summary>
+    public void SuspendAttractAndPlaybackForTransition()
+    {
+        if (mainCoroutine != null)
+        {
+            StopCoroutine(mainCoroutine);
+            mainCoroutine = null;
+        }
+
+        if (videoPlayer != null)
+            videoPlayer.Pause();
+
+        if (audioPlayer != null)
+            audioPlayer.Stop();
+    }
+
     IEnumerator runBT()
     {
         // LibretroMameCore.WriteConsole($"[LibretroScreenController.runBT] coroutine BT cicle Start {gameObject.name}");
