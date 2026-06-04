@@ -129,6 +129,9 @@ public class MREnvironmentSurfaces : MonoBehaviour
 
     void ShowRoomInfoUI()
     {
+        if (!MRRuntimeSettings.ShowRoomAnchorInfoCanvas)
+            return;
+
         MRRoomInfoUI ui = MRRoomInfoUI.Instance;
         if (ui == null)
             ui = GetComponent<MRRoomInfoUI>();

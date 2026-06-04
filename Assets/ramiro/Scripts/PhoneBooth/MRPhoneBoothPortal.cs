@@ -11,17 +11,12 @@ using UnityEngine;
 public class MRPhoneBoothPortal : MonoBehaviour
 {
     const string LogPrefix = "[MRPhoneBoothPortal]";
-    const string BoothObjectName = "PF_Payphone";
     const string HandsetAudioCueObjectName = "AudioCue";
     const string SpaceshipEngineAudioObjectName = "AudioSpaceshipEngine";
     const string ExplosionAudioObjectName = "AudioExplosion";
     const string ExplosionSmokeObjectName = "ParticleSmoke";
-    const string ExteriorSceneName = "IntroGalleryExterior";
-    const float DefaultTravelDurationSeconds = 3.5f;
-
     static MRPhoneBoothPortal activeTraveler;
 
-    [SerializeField] float travelDurationSeconds = DefaultTravelDurationSeconds;
     [SerializeField] BoxCollider interiorTrigger;
     [Tooltip("Child named AudioCue (PF_Grabbable_Phone) — plays when handset is grabbed, before travel.")]
     [SerializeField] AudioSource handsetAudioCue;
@@ -362,7 +357,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         }
 
         GameObject instance = Object.Instantiate(prefab);
-        instance.name = BoothObjectName;
+        instance.name = MRRuntimeSettings.PhoneBoothObject;
         MRPhoneBoothPortal portal = EnsureOn(instance);
         AdoptAsTraveler(portal, manager.transform);
 
@@ -381,15 +376,31 @@ public class MRPhoneBoothPortal : MonoBehaviour
             if (portal.isTravelerInstance)
                 continue;
 
-            if (portal.gameObject.scene.name == ExteriorSceneName)
+            if (portal.gameObject.scene.name == MRRuntimeSettings.ExteriorScene)
                 return portal;
         }
 
-        GameObject booth = GameObject.Find(BoothObjectName);
+        GameObject booth = GameObject.Find(MRRuntimeSettings.PhoneBoothObject);
         return booth != null ? EnsureOn(booth) : null;
     }
 
     bool CanStartTravel() => PlayerInside || handsetGrabbed;
+
+#if UNITY_EDITOR
+    /// <summary>Editor P-key simulator — satisfy CanStartTravel / CaptureTravelState without trigger volume.</summary>
+    public void EditorMarkReadyForSimulatedTravel()
+    {
+        playersInside = Mathf.Max(1, playersInside);
+        handsetGrabbed = true;
+    }
+
+    /// <summary>Fallback when grab simulation did not start the coroutine.</summary>
+    public void EditorRetryStartTravelFromHandset()
+    {
+        handsetGrabbed = true;
+        TryStartTravelFromHandset();
+    }
+#endif
 
     void EnsureInteriorTrigger()
     {
@@ -478,27 +489,59 @@ public class MRPhoneBoothPortal : MonoBehaviour
         EnsureTravelVfx();
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect start");
 
-        yield return PlayHandsetAudioCueAndWait();
-        if (travelCancelRequested)
-            yield break;
+        foreach (MRPhoneBoothTransitionSequence.ImmersiveTravelStep step in
+                 MRRuntimeSettings.ImmersiveTravelSteps)
+        {
+            if (travelCancelRequested)
+                yield break;
 
-        travelPastHandsetCue = true;
-
-        MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey start (spaceship engine)");
-        travelVfx?.BeginJourneyVisuals(currentJourneyDirection);
-
-        var fadeSphere = GameObject.Find("SM_FadeSphere");
-        Animator fadeAnimator = fadeSphere != null ? fadeSphere.GetComponent<Animator>() : null;
-        if (fadeAnimator != null)
-            fadeAnimator.SetTrigger("FadeInTrigger");
-
-        yield return PlaySpaceshipEngineAndWait();
-
-        travelVfx?.EndJourneyVisuals(currentJourneyDirection);
+            yield return RunImmersiveTravelStep(step);
+            if (travelCancelRequested)
+                yield break;
+        }
 
         CompleteTravelSequence();
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "PlayTravelEffect end");
         onComplete?.Invoke();
+    }
+
+    IEnumerator RunImmersiveTravelStep(MRPhoneBoothTransitionSequence.ImmersiveTravelStep step)
+    {
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"immersive step {step}");
+
+        switch (step)
+        {
+            case MRPhoneBoothTransitionSequence.ImmersiveTravelStep.HandsetAudioCue:
+                yield return PlayHandsetAudioCueAndWait();
+                travelPastHandsetCue = true;
+                break;
+
+            case MRPhoneBoothTransitionSequence.ImmersiveTravelStep.BeginJourneyVisuals:
+                MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey start (spaceship engine)");
+                travelVfx?.BeginJourneyVisuals(currentJourneyDirection);
+                yield return WaitOptionalImmersiveStep(
+                    MRRuntimeSettings.ImmersiveBeginJourneyStepDurationSeconds);
+                break;
+
+            case MRPhoneBoothTransitionSequence.ImmersiveTravelStep.FadeSphereIn:
+                var fadeSphere = GameObject.Find("SM_FadeSphere");
+                Animator fadeAnimator = fadeSphere != null ? fadeSphere.GetComponent<Animator>() : null;
+                if (fadeAnimator != null)
+                    fadeAnimator.SetTrigger("FadeInTrigger");
+                yield return WaitOptionalImmersiveStep(
+                    MRRuntimeSettings.ImmersiveFadeSphereStepDurationSeconds);
+                break;
+
+            case MRPhoneBoothTransitionSequence.ImmersiveTravelStep.SpaceshipEngine:
+                yield return PlaySpaceshipEngineAndWait();
+                break;
+
+            case MRPhoneBoothTransitionSequence.ImmersiveTravelStep.EndJourneyVisuals:
+                travelVfx?.EndJourneyVisuals(currentJourneyDirection);
+                yield return WaitOptionalImmersiveStep(
+                    MRRuntimeSettings.ImmersiveEndJourneyStepDurationSeconds);
+                break;
+        }
     }
 
     void CancelTravelBeforeCommit()
@@ -646,22 +689,85 @@ public class MRPhoneBoothPortal : MonoBehaviour
     IEnumerator PlayHandsetAudioCueAndWait()
     {
         EnsureHandsetAudioCue();
-        yield return PlayAudioSourceAndWait(handsetAudioCue, HandsetAudioCueObjectName);
+        yield return PlayAudioSourceForFixedDuration(
+            handsetAudioCue,
+            HandsetAudioCueObjectName,
+            MRRuntimeSettings.ImmersiveHandsetCueStepDurationSeconds);
     }
 
     IEnumerator PlaySpaceshipEngineAndWait()
     {
+        float stepDuration = MRRuntimeSettings.ImmersiveSpaceshipEngineStepDurationSeconds;
+        if (stepDuration <= 0f)
+            stepDuration = MRRuntimeSettings.DefaultImmersiveSpaceshipEngineStepDurationSeconds;
+
         EnsureSpaceshipEngineAudio();
         if (spaceshipEngineAudio == null || spaceshipEngineAudio.clip == null)
         {
             ConfigManager.WriteConsoleWarning(
                 $"{LogPrefix} {SpaceshipEngineAudioObjectName} missing or has no clip — fallback travel wait");
-            float duration = Mathf.Max(1f, travelDurationSeconds);
-            yield return new WaitForSecondsRealtime(duration);
+            yield return WaitImmersiveStepDuration(Mathf.Max(1f, stepDuration));
             yield break;
         }
 
-        yield return PlayAudioSourceAndWait(spaceshipEngineAudio, SpaceshipEngineAudioObjectName);
+        yield return PlayAudioSourceForFixedDuration(
+            spaceshipEngineAudio,
+            SpaceshipEngineAudioObjectName,
+            stepDuration);
+    }
+
+    /// <summary>Starts clip and waits a fixed time; does not stop the source when the step ends (overlap OK).</summary>
+    IEnumerator PlayAudioSourceForFixedDuration(AudioSource source, string objectName, float durationSeconds)
+    {
+        if (source == null || source.clip == null)
+        {
+            ConfigManager.WriteConsoleWarning(
+                $"{LogPrefix} {objectName} missing or has no clip — skipping");
+            yield break;
+        }
+
+        if (!source.gameObject.activeInHierarchy)
+            source.gameObject.SetActive(true);
+
+        MRTransitionLog.LogStep("MRPhoneBoothPortal",
+            $"{objectName} play clip={source.clip.name} step={durationSeconds:F2}s (fixed, no stop on advance)");
+
+        source.Stop();
+        source.Play();
+
+        yield return WaitImmersiveStepDuration(durationSeconds);
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"{objectName} step duration elapsed (audio may still play)");
+    }
+
+    IEnumerator WaitOptionalImmersiveStep(float durationSeconds)
+    {
+        if (durationSeconds <= 0f)
+            yield break;
+
+        yield return WaitImmersiveStepDuration(durationSeconds);
+    }
+
+    IEnumerator WaitImmersiveStepDuration(float durationSeconds)
+    {
+        float elapsed = 0f;
+        while (elapsed < durationSeconds && !travelCancelRequested)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+    }
+
+    static IEnumerator WaitStepDurationSeconds(float durationSeconds)
+    {
+        if (durationSeconds <= 0f)
+            yield break;
+
+        float elapsed = 0f;
+        while (elapsed < durationSeconds)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
     }
 
     /// <summary>After MR/VR load completes — journey has ended.</summary>
@@ -669,6 +775,31 @@ public class MRPhoneBoothPortal : MonoBehaviour
     {
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey end (AudioExplosion)");
         yield return PlayArrivalExplosionAndWait(ResolveExplosionClip(), preferSpatialExplosionAudio: true);
+    }
+
+    /// <summary>Arrival explosion, then delay, then normal glass + travel door off (ToMR).</summary>
+    public IEnumerator PlayTravelArrivalExplosionAndRestoreGlassDoor()
+    {
+        yield return PlayTravelArrivalExplosionAndWait();
+        yield return WaitAfterArrivalExplosionBeforeGlassDoor();
+        RestoreTravelGlassAndDoor();
+    }
+
+    public void RestoreTravelGlassAndDoor()
+    {
+        EnsureTravelVfx();
+        travelVfx?.RestoreGlassAfterMrTransition();
+    }
+
+    IEnumerator WaitAfterArrivalExplosionBeforeGlassDoor()
+    {
+        float delay = MRRuntimeSettings.SecondsAfterArrivalExplosionBeforeGlassAndDoor;
+        if (delay <= 0f)
+            yield break;
+
+        MRTransitionLog.LogStep("MRPhoneBoothPortal",
+            $"wait {delay:F2}s after explosion before glass/door restore");
+        yield return WaitStepDurationSeconds(delay);
     }
 
     /// <summary>Smoke + explosion audio on this booth (or 2D fallback clip).</summary>
@@ -684,25 +815,38 @@ public class MRPhoneBoothPortal : MonoBehaviour
             && explosionAudio.clip != null
             && gameObject.activeInHierarchy)
         {
-            yield return PlayAudioSourceAndWait(explosionAudio, ExplosionAudioObjectName);
+            yield return PlayAudioSourceForFixedDuration(
+                explosionAudio,
+                ExplosionAudioObjectName,
+                MRRuntimeSettings.ArrivalExplosionStepDurationSeconds);
             yield break;
         }
 
-        yield return PlayArrivalExplosionClipAndWait(clip);
+        yield return PlayArrivalExplosionClipForFixedDuration(clip);
     }
 
-    /// <summary>MR→VR: smoke on the reloaded scene booth + reliable 2D explosion (traveler may be destroyed).</summary>
-    public static IEnumerator PlayArrivalExplosionForVrReturn(MRPhoneBoothPortal scenePortal, AudioClip clip)
+    /// <summary>MR→VR: explosion on scene booth, delay, then glass/door restore.</summary>
+    public static IEnumerator PlayArrivalExplosionForVrReturnAndRestoreGlassDoor(
+        MRPhoneBoothPortal scenePortal,
+        AudioClip clip)
     {
         if (scenePortal == null)
             scenePortal = FindSceneBoothPortal();
 
-        scenePortal?.PlayArrivalExplosionSmoke();
+        if (scenePortal != null)
+        {
+            yield return scenePortal.PlayArrivalExplosionAndWait(clip, preferSpatialExplosionAudio: true);
+            yield return scenePortal.WaitAfterArrivalExplosionBeforeGlassDoor();
+            scenePortal.RestoreTravelGlassAndDoor();
+            yield break;
+        }
 
-        if (clip == null && scenePortal != null)
-            clip = scenePortal.ResolveExplosionClip();
+        if (clip == null)
+            yield break;
 
-        yield return PlayArrivalExplosionClipAndWait(clip);
+        yield return PlayArrivalExplosionClipForFixedDuration(clip);
+        yield return WaitStepDurationSeconds(
+            MRRuntimeSettings.SecondsAfterArrivalExplosionBeforeGlassAndDoor);
     }
 
     /// <summary>Arrival burst on a scene/traveler booth; audio falls back to 2D one-shot if needed.</summary>
@@ -717,7 +861,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
             yield break;
         }
 
-        yield return PlayArrivalExplosionClipAndWait(fallbackClip);
+        yield return PlayArrivalExplosionClipForFixedDuration(fallbackClip);
     }
 
     public AudioClip ResolveExplosionClip()
@@ -736,7 +880,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     }
 
     /// <summary>2D one-shot — reliable after MR traveler booth is destroyed.</summary>
-    public static IEnumerator PlayArrivalExplosionClipAndWait(AudioClip clip)
+    public static IEnumerator PlayArrivalExplosionClipForFixedDuration(AudioClip clip)
     {
         if (clip == null)
         {
@@ -744,64 +888,22 @@ public class MRPhoneBoothPortal : MonoBehaviour
             yield break;
         }
 
-        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"AudioExplosion play clip={clip.name}");
+        float duration = MRRuntimeSettings.ArrivalExplosionStepDurationSeconds;
+        MRTransitionLog.LogStep("MRPhoneBoothPortal",
+            $"AudioExplosion play clip={clip.name} step={duration:F2}s (fixed)");
+
         var oneShotObject = new GameObject("PhoneBoothExplosionOneShot");
         Object.DontDestroyOnLoad(oneShotObject);
         AudioSource source = oneShotObject.AddComponent<AudioSource>();
         source.clip = clip;
         source.spatialBlend = 0f;
         source.playOnAwake = false;
-        source.volume = 1f;
+        source.volume = MRRuntimeSettings.ArrivalExplosionVolume;
         source.Play();
 
-        float pitch = Mathf.Max(0.01f, Mathf.Abs(source.pitch));
-        float waitSeconds = clip.length / pitch + 0.05f;
-        float elapsed = 0f;
-
-        while (source.isPlaying && elapsed < waitSeconds)
-        {
-            elapsed += Time.unscaledDeltaTime;
-            yield return null;
-        }
-
+        yield return WaitStepDurationSeconds(duration);
         Destroy(oneShotObject);
-        MRTransitionLog.LogStep("MRPhoneBoothPortal", "AudioExplosion finished");
-    }
-
-    IEnumerator PlayAudioSourceAndWait(AudioSource source, string objectName, bool force2D = false)
-    {
-        if (source == null || source.clip == null)
-        {
-            ConfigManager.WriteConsoleWarning(
-                $"{LogPrefix} {objectName} missing or has no clip — skipping");
-            yield break;
-        }
-
-        if (!source.gameObject.activeInHierarchy)
-            source.gameObject.SetActive(true);
-
-        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"{objectName} play clip={source.clip.name}");
-        float savedSpatialBlend = source.spatialBlend;
-        if (force2D)
-            source.spatialBlend = 0f;
-
-        source.Stop();
-        source.Play();
-
-        float pitch = Mathf.Max(0.01f, Mathf.Abs(source.pitch));
-        float waitSeconds = source.clip.length / pitch + 0.05f;
-        float elapsed = 0f;
-
-        while (source.isPlaying && elapsed < waitSeconds)
-        {
-            elapsed += Time.unscaledDeltaTime;
-            yield return null;
-        }
-
-        if (force2D)
-            source.spatialBlend = savedSpatialBlend;
-
-        MRTransitionLog.LogStep("MRPhoneBoothPortal", $"{objectName} finished");
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "AudioExplosion step duration elapsed");
     }
 
     float ComputeLowestWorldY()
@@ -854,12 +956,13 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         static void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
         {
-            if (scene.name != ExteriorSceneName)
+            if (scene.name != MRRuntimeSettings.ExteriorScene)
                 return;
 
+            string boothName = MRRuntimeSettings.PhoneBoothObject;
             foreach (GameObject root in scene.GetRootGameObjects())
             {
-                if (root.name != BoothObjectName && !root.name.StartsWith(BoothObjectName))
+                if (root.name != boothName && !root.name.StartsWith(boothName))
                     continue;
 
                 EnsureOn(root);

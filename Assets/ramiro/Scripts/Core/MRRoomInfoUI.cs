@@ -58,6 +58,12 @@ public class MRRoomInfoUI : MonoBehaviour
 
     public void Show()
     {
+        if (!MRRuntimeSettings.ShowRoomAnchorInfoCanvas)
+        {
+            Hide();
+            return;
+        }
+
         RefreshContent();
         visible = true;
         if (canvas != null)

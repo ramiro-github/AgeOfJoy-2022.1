@@ -463,7 +463,9 @@ public class PayphoneHandsetGrab : MonoBehaviour
             return;
 
         isGrabbed = true;
-        virtualGrabFromTravel = false;
+        // Without virtual grab, Update() sees !grabInteractable.isSelected and EndGrabImmediate() cancels travel.
+        virtualGrabFromTravel = true;
+        virtualGrabReleaseAllowedTime = float.MaxValue;
         EnsureNotStatic();
         EnsurePhoneBoothPortal();
 

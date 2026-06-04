@@ -96,9 +96,6 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         ApplyPhoneBoothOpaqueGlass();
         StartCabinetShake();
 
-        if (direction == PhoneBoothJourneyDirection.ToMR)
-            MRPhoneBoothExteriorSidewalk.SetSidewalk8Active(false);
-
         ConfigManager.WriteConsole(
             $"{LogPrefix} journey ON dir={direction} glow={glowMaterialTargets.Count} glass={glassMaterialSnapshots.Count} shakeTargets={shakeTargets.Count}");
         MRTransitionLog.LogStep("MRPhoneBoothTravelVfx", "BeginJourneyVisuals");

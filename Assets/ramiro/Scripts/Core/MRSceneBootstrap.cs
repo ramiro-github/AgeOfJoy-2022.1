@@ -344,7 +344,8 @@ public class MRSceneBootstrap : MonoBehaviour
             return;
 
         MRRoomInfoUI.Instance?.RefreshContent();
-        if (MixedRealityManager.Instance != null
+        if (MRRuntimeSettings.ShowRoomAnchorInfoCanvas
+            && MixedRealityManager.Instance != null
             && MixedRealityManager.Instance.CurrentMode != ExperienceMode.VR)
             MRRoomInfoUI.Instance?.Show();
     }

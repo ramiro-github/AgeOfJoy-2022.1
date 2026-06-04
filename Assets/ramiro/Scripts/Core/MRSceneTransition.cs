@@ -10,13 +10,8 @@ using UnityEngine.SceneManagement;
 public class MRSceneTransition : MonoBehaviour
 {
     const string LogPrefix = "[MRSceneTransition]";
-    const string FixedSceneName = "FixedScene";
 
-    static readonly string[] ScenesToReloadOnExitMr =
-    {
-        "IntroGalleryExterior",
-        "IntroGallery",
-    };
+    static string FixedSceneName => MRRuntimeSettings.FixedScene;
 
     readonly List<string> unloadedSceneNames = new List<string>();
     bool transitionRunning;
@@ -176,7 +171,7 @@ public class MRSceneTransition : MonoBehaviour
 
         if (scenesToLoad.Count == 0)
         {
-            foreach (string sceneName in ScenesToReloadOnExitMr)
+            foreach (string sceneName in MRRuntimeSettings.VrScenesToReloadOnExitMr())
             {
                 if (!scenesToLoad.Contains(sceneName))
                     scenesToLoad.Add(sceneName);
@@ -200,9 +195,9 @@ public class MRSceneTransition : MonoBehaviour
 
     static void ActivateBestVrScene()
     {
-        Scene target = SceneManager.GetSceneByName("IntroGallery");
+        Scene target = SceneManager.GetSceneByName(MRRuntimeSettings.IntroGalleryScene);
         if (!target.isLoaded)
-            target = SceneManager.GetSceneByName("IntroGalleryExterior");
+            target = SceneManager.GetSceneByName(MRRuntimeSettings.ExteriorScene);
 
         if (!target.isLoaded)
         {

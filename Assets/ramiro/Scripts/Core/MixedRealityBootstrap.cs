@@ -10,9 +10,9 @@ public static class MixedRealityBootstrap
     const string RootName = "MixedRealitySystem";
 
     static bool ShouldInstallForScene(string sceneName) =>
-        sceneName == "FixedScene"
+        sceneName == MRRuntimeSettings.FixedScene
         || sceneName == "TestMRmanager"
-        || sceneName == "IntroGalleryExterior";
+        || sceneName == MRRuntimeSettings.ExteriorScene;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Install()

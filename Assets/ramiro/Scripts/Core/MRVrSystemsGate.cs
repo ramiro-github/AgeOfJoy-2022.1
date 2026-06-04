@@ -28,12 +28,24 @@ public static class MRVrSystemsGate
     {
         MRTransitionLog.LogStep("MRVrSystemsGate.ResumeForVR");
         ConfigManager.WriteConsole($"{LogPrefix} ResumeForVR (VR scenes reload separately)");
+        ResumeVrSystemsExceptLocomotion();
+        ResumePlayerLocomotionForVr();
+        MRTransitionLog.Log("MRVrSystemsGate.ResumeForVR done");
+    }
+
+    /// <summary>VR cabinets / hands — locomotion stays suspended until <see cref="ResumePlayerLocomotionForVr"/>.</summary>
+    public static void ResumeVrSystemsExceptLocomotion()
+    {
         StopActiveLibretroGames();
         EnableVrCabinetControllers();
         EnsureHandModelsVisible();
-        ResumePlayerLocomotion();
         ResetLegacyPassthroughState();
-        MRTransitionLog.Log("MRVrSystemsGate.ResumeForVR done");
+    }
+
+    public static void ResumePlayerLocomotionForVr()
+    {
+        MRTransitionLog.LogStep("MRVrSystemsGate.ResumePlayerLocomotionForVr");
+        ResumePlayerLocomotion();
     }
 
     public static void StopActiveLibretroGames()

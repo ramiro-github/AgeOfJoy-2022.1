@@ -85,6 +85,8 @@ public class MixedRealityManager : MonoBehaviour
         if (GetComponent<MRConfigurationCabinetController>() == null)
             gameObject.AddComponent<MRConfigurationCabinetController>();
 
+        MRRuntimeSettings.LogMissingInstanceOnce("MixedRealityManager.Awake");
+
         if (GetComponent<MREditorMrSimulator>() == null)
             gameObject.AddComponent<MREditorMrSimulator>();
 
@@ -186,6 +188,9 @@ public class MixedRealityManager : MonoBehaviour
     /// <summary>Saves gallery player pose before phone booth VR→MR travel (restored on booth return).</summary>
     public void RememberVrPlayerPoseForPhoneBoothTravel()
     {
+        if (!MRRuntimeSettings.RememberVrPoseOnPhoneBoothTravelToMr)
+            return;
+
         RememberVrPlayerPose();
     }
 
@@ -407,7 +412,9 @@ public class MixedRealityManager : MonoBehaviour
 
         MRRoomInfoUI.Instance?.RefreshContent();
 
-        RememberVrPlayerPose();
+        if (MRRuntimeSettings.RememberVrPoseOnStandardEnterMr)
+            RememberVrPlayerPose();
+
         MRTransitionLog.LogStep("EnterMRCoroutine", "before SuspendForMR");
         MRVrSystemsGate.SuspendForMR();
 
@@ -470,7 +477,6 @@ public class MixedRealityManager : MonoBehaviour
         if (!IsTransitionCurrent(generation))
             yield break;
 
-        RestorePhoneBoothTravelGlass(portal);
         portal.NotifyHandsetsTravelComplete();
 
         passthrough.RefreshPassthroughAfterSceneUnload();
@@ -504,7 +510,7 @@ public class MixedRealityManager : MonoBehaviour
         MRPhoneBoothSettings.SetVisible(true);
         portal.SetVisible(true);
 
-        yield return portal.PlayTravelArrivalExplosionAndWait();
+        yield return portal.PlayTravelArrivalExplosionAndRestoreGlassDoor();
         if (!IsTransitionCurrent(generation))
             yield break;
 
@@ -513,6 +519,16 @@ public class MixedRealityManager : MonoBehaviour
         MRTransitionLog.LogManagerState("EnterMRFromPhoneBoothCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterMRFromPhoneBooth done");
         MRTransitionLog.LogStep("EnterMRFromPhoneBoothCoroutine", "DONE");
+    }
+
+    sealed class PhoneBoothMrToVrContext
+    {
+        public MRPhoneBoothPortal travelerPortal;
+        public PhoneBoothTravelState travelState;
+        public PayphoneHandsetGrab.VrReturnHandsetPlan handsetPlan;
+        public MRPhoneBoothPortal scenePortal;
+        public AudioClip arrivalExplosionClip;
+        public bool restoredGalleryPose;
     }
 
     IEnumerator EnterVRFromPhoneBoothCoroutine(MRPhoneBoothPortal travelerPortal)
@@ -530,72 +546,140 @@ public class MixedRealityManager : MonoBehaviour
         if (travelerPortal != null && travelerPortal.IsTravelerInstance)
             MRPhoneBoothSettings.SaveMrPose(travelerPortal.transform.position, travelerPortal.transform.rotation);
 
-        PayphoneHandsetGrab.VrReturnHandsetPlan handsetPlan =
-            PayphoneHandsetGrab.CaptureVrReturnPlan(travelerPortal, travelState);
+        var ctx = new PhoneBoothMrToVrContext
+        {
+            travelerPortal = travelerPortal,
+            travelState = travelState,
+            handsetPlan = PayphoneHandsetGrab.CaptureVrReturnPlan(travelerPortal, travelState),
+        };
 
-        // Phase 1 — reload VR additive scenes (player rig stays DDOL).
-        yield return sceneTransition.ReloadVrScenes();
-        if (!IsTransitionCurrent(generation))
-            yield break;
+        foreach (MRPhoneBoothTransitionSequence.MrToVrReturnStep step in MRRuntimeSettings.MrToVrReturnSteps)
+        {
+            if (!IsTransitionCurrent(generation))
+                yield break;
 
-        MRPhoneBoothExteriorSidewalk.SetSidewalk8Active(true);
-
-        // Phase 2 — gallery player pose (RememberVr at BeginTravelToMR) + handset move to scene booth.
-        MRPhoneBoothPortal scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
-        AudioClip arrivalExplosionClip =
-            MRPhoneBoothPortal.ResolveExplosionClip(scenePortal, travelerPortal);
-
-        bool restoredGalleryPose = TryRestoreVrPlayerPose();
-        MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine",
-            restoredGalleryPose ? "after RestoreVrPlayerPose" : "RestoreVrPlayerPose skipped");
-        RefreshPlayerControllerCameraOffset();
-
-        if (!restoredGalleryPose)
-            ApplyPhoneBoothTravelState(scenePortal, travelState);
-
-        PayphoneHandsetGrab.FinalizeForVrSceneReturn(travelerPortal, scenePortal, handsetPlan);
-
-        scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
-        if (arrivalExplosionClip == null)
-            arrivalExplosionClip = MRPhoneBoothPortal.ResolveExplosionClip(scenePortal, null);
-
-        yield return null;
-
-        // Phase 3 — arrival smoke + 2D explosion (before camera rebind; clip cached before traveler destroy).
-        yield return MRPhoneBoothPortal.PlayArrivalExplosionForVrReturn(scenePortal, arrivalExplosionClip);
-
-        // Phase 4 — VR mode, locomotion, handset settle.
-        passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
-        ResetLegacyPassthroughFlags();
-        SetMode(ExperienceMode.VR);
-        MRVrSystemsGate.ResumeForVR();
-        PayphoneHandsetGrab.RefreshGrabbedHandVisibility(scenePortal);
-        scenePortal?.NotifyHandsetsTravelComplete();
-
-        // Phase 5 — MR teardown.
-        MRLayoutRegistry registry = ActiveRegistry();
-        MREnvironmentRegistry envRegistry = ActiveEnvironmentRegistry();
-        MRVrSystemsGate.StopActiveLibretroGames();
-        if (registry != null)
-            yield return registry.DespawnAllAsync(stopLibretroFirst: true);
-        if (envRegistry != null)
-            yield return envRegistry.DespawnAllAsync();
-        if (!IsTransitionCurrent(generation))
-            yield break;
-
-        MRVrSystemsGate.StopActiveLibretroGames();
-        environmentSurfaces?.ClearMrukScene();
-        MRRoomInfoUI.Instance?.Hide();
-        DestroyMRSpaceOrigin();
-        MRConfigurationCabinetController.Instance?.ReleaseForVrTransition();
-        yield return null;
-
-        passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
-        ResetLegacyPassthroughFlags();
+            yield return RunPhoneBoothMrToVrStep(step, generation, ctx);
+        }
 
         MRTransitionLog.LogManagerState("EnterVRFromPhoneBoothCoroutine-final");
         ConfigManager.WriteConsole($"{LogPrefix} EnterVRFromPhoneBooth done");
         MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine", "DONE");
+    }
+
+    IEnumerator RunPhoneBoothMrToVrStep(
+        MRPhoneBoothTransitionSequence.MrToVrReturnStep step,
+        int generation,
+        PhoneBoothMrToVrContext ctx)
+    {
+        MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine", $"step {step}");
+
+        switch (step)
+        {
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.ReloadVrScenes:
+                yield return sceneTransition.ReloadVrScenes();
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.CacheArrivalExplosionClip:
+                ctx.scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+                ctx.arrivalExplosionClip =
+                    MRPhoneBoothPortal.ResolveExplosionClip(ctx.scenePortal, ctx.travelerPortal);
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.RestoreGalleryPlayerPose:
+                ctx.restoredGalleryPose = false;
+                if (MRRuntimeSettings.RestoreVrPoseOnPhoneBoothReturn)
+                    ctx.restoredGalleryPose = TryRestoreVrPlayerPose();
+
+                MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine",
+                    ctx.restoredGalleryPose ? "after RestoreVrPlayerPose" : "RestoreVrPlayerPose skipped");
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.RefreshCameraOffset:
+                if (MRRuntimeSettings.RefreshCameraOffsetAfterPhoneBoothReturn)
+                    RefreshPlayerControllerCameraOffset();
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.ApplyTravelStateFallback:
+                if (!ctx.restoredGalleryPose && MRRuntimeSettings.FallbackTravelStateIfRestoreFails)
+                {
+                    if (ctx.scenePortal == null)
+                        ctx.scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+                    ApplyPhoneBoothTravelState(ctx.scenePortal, ctx.travelState);
+                }
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.FinalizeHandsetOnSceneBooth:
+                if (ctx.scenePortal == null)
+                    ctx.scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+                PayphoneHandsetGrab.FinalizeForVrSceneReturn(
+                    ctx.travelerPortal, ctx.scenePortal, ctx.handsetPlan);
+                ctx.scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+                if (ctx.arrivalExplosionClip == null)
+                    ctx.arrivalExplosionClip =
+                        MRPhoneBoothPortal.ResolveExplosionClip(ctx.scenePortal, null);
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.WaitFramesBeforeArrivalEffects:
+                float delay = MRRuntimeSettings.SecondsBeforeArrivalExplosion;
+                if (delay > 0f)
+                    yield return new WaitForSecondsRealtime(delay);
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.ArrivalExplosionAndSmoke:
+                if (ctx.scenePortal == null)
+                    ctx.scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+                if (ctx.arrivalExplosionClip == null)
+                    ctx.arrivalExplosionClip =
+                        MRPhoneBoothPortal.ResolveExplosionClip(ctx.scenePortal, null);
+                yield return MRPhoneBoothPortal.PlayArrivalExplosionForVrReturnAndRestoreGlassDoor(
+                    ctx.scenePortal, ctx.arrivalExplosionClip);
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.EnableVrModeAndLocomotion:
+                passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
+                ResetLegacyPassthroughFlags();
+                SetMode(ExperienceMode.VR);
+                MRVrSystemsGate.ResumeVrSystemsExceptLocomotion();
+                if (ctx.scenePortal == null)
+                    ctx.scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+                PayphoneHandsetGrab.RefreshGrabbedHandVisibility(ctx.scenePortal);
+                ctx.scenePortal?.NotifyHandsetsTravelComplete();
+
+                float controlsDelay = MRRuntimeSettings.SecondsBeforeResumeVrControlsOnPhoneBoothReturn;
+                if (controlsDelay > 0f)
+                {
+                    MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine",
+                        $"wait {controlsDelay:F2}s before VR locomotion");
+                    yield return new WaitForSecondsRealtime(controlsDelay);
+                }
+
+                MRVrSystemsGate.ResumePlayerLocomotionForVr();
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.MrEnvironmentCleanup:
+                MRLayoutRegistry registry = ActiveRegistry();
+                MREnvironmentRegistry envRegistry = ActiveEnvironmentRegistry();
+                MRVrSystemsGate.StopActiveLibretroGames();
+                if (registry != null)
+                    yield return registry.DespawnAllAsync(stopLibretroFirst: true);
+                if (envRegistry != null)
+                    yield return envRegistry.DespawnAllAsync();
+                if (!IsTransitionCurrent(generation))
+                    yield break;
+
+                MRVrSystemsGate.StopActiveLibretroGames();
+                environmentSurfaces?.ClearMrukScene();
+                MRRoomInfoUI.Instance?.Hide();
+                DestroyMRSpaceOrigin();
+                MRConfigurationCabinetController.Instance?.ReleaseForVrTransition();
+                yield return null;
+                break;
+
+            case MRPhoneBoothTransitionSequence.MrToVrReturnStep.FinalPassthroughRebind:
+                passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
+                ResetLegacyPassthroughFlags();
+                break;
+        }
     }
 
     static void ApplyPhoneBoothTravelState(MRPhoneBoothPortal portal, PhoneBoothTravelState state)
@@ -608,11 +692,7 @@ public class MixedRealityManager : MonoBehaviour
 
     static void RestorePhoneBoothTravelGlass(MRPhoneBoothPortal portal)
     {
-        if (portal == null)
-            return;
-
-        MRPhoneBoothTravelVfx travelVfx = portal.GetComponent<MRPhoneBoothTravelVfx>();
-        travelVfx?.RestoreGlassAfterMrTransition();
+        portal?.RestoreTravelGlassAndDoor();
     }
 
     IEnumerator RefreshMrPosesWhenReady(int generation, Transform player)
@@ -666,7 +746,9 @@ public class MixedRealityManager : MonoBehaviour
         MRTransitionLog.LogScenes("EnterVRCoroutine-after-reload");
         MRTransitionLog.LogManagerState("EnterVRCoroutine-after-reload");
 
-        RestoreVrPlayerPose();
+        if (MRRuntimeSettings.RestoreVrPoseOnStandardEnterVr)
+            RestoreVrPlayerPose();
+
         MRTransitionLog.LogStep("EnterVRCoroutine", "after RestoreVrPlayerPose");
 
         passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);

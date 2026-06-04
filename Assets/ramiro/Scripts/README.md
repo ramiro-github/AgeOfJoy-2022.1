@@ -89,7 +89,6 @@ playing travel VFX, managing travel state, and the VR↔MR portal logic.
 | `MRPhoneBoothTravelVfx` | Door VFX, glass opacity swap, shake, passthrough control during travel |
 | `MRPhoneBoothSettings` | ScriptableObject / static config (audio clips, timing values) |
 | `MRPhoneBoothVisibility` | Shows / hides the CRT **PHONE BOOTH** button based on MR state |
-| `MRPhoneBoothExteriorSidewalk` | Controls the exterior sidewalk prop visibility during travel |
 | `PhoneBoothJourneyDirection` | Enum: `VrToMr`, `MrToVr` |
 | `PhoneBoothTravelState` | State machine enum for the travel sequence phases |
 

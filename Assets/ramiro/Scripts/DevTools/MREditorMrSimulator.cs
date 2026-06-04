@@ -3,6 +3,9 @@ This program is free software: you can redistribute it and/or modify it under th
 */
 
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -53,7 +56,7 @@ public class MREditorMrSimulator : MonoBehaviour
     void Update()
     {
 #if UNITY_EDITOR
-        if (!Application.isEditor || !Input.GetKeyDown(KeyCode.P))
+        if (!Application.isEditor || !EditorPhoneBoothTravelKeyPressed())
             return;
 
         TrySimulatePhoneBoothTravel();
@@ -130,6 +133,7 @@ public class MREditorMrSimulator : MonoBehaviour
             return;
         }
 
+        portal.EditorMarkReadyForSimulatedTravel();
         SnapPlayerInsideBoothForEditor(portal);
 
         PayphoneHandsetGrab grab = PayphoneHandsetGrab.FindOnPortal(portal);
@@ -138,8 +142,33 @@ public class MREditorMrSimulator : MonoBehaviour
         else
             portal.NotifyHandsetGrabbedForTravel();
 
+        if (!portal.TravelInProgress)
+        {
+            portal.EditorRetryStartTravelFromHandset();
+            if (!portal.TravelInProgress)
+            {
+                ConfigManager.WriteConsoleWarning(
+                    $"{LogPrefix} P — travel did not start (check console for [MRPhoneBoothPortal] / player rig)");
+                return;
+            }
+        }
+
         ConfigManager.WriteConsole(
             $"{LogPrefix} P — immersive phone booth travel (mode={manager.CurrentMode}, portal={portal.name})");
+    }
+
+    static bool EditorPhoneBoothTravelKeyPressed()
+    {
+        if (Input.GetKeyDown(KeyCode.P))
+            return true;
+
+#if ENABLE_INPUT_SYSTEM
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard != null && keyboard.pKey.wasPressedThisFrame)
+            return true;
+#endif
+
+        return false;
     }
 
     static MRPhoneBoothPortal ResolvePhoneBoothPortalForEditor(MixedRealityManager manager)
