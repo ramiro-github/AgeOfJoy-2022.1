@@ -113,11 +113,12 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         StopCabinetShake();
         RestorePhoneBoothTravelGlow();
 
-        // ToMR: keep opaque glass until MixedRealityManager finishes passthrough (avoids VR gallery flash).
+        // ToMR: keep opaque glass + travel door until MixedRealityManager finishes passthrough.
         if (direction == PhoneBoothJourneyDirection.ToVR)
+        {
             RestorePhoneBoothGlass();
-
-        SetDoorPhoneboothActive(false);
+            SetDoorPhoneboothActive(false);
+        }
 
         ConfigManager.WriteConsole($"{LogPrefix} journey OFF dir={direction}");
         MRTransitionLog.LogStep("MRPhoneBoothTravelVfx", "EndJourneyVisuals");
@@ -236,13 +237,14 @@ public class MRPhoneBoothTravelVfx : MonoBehaviour
         }
     }
 
-    /// <summary>After MR passthrough is on — undo travel opaque glass (skipped in EndJourneyVisuals for ToMR).</summary>
+    /// <summary>After MR passthrough is on — undo travel opaque glass and close travel door (ToMR).</summary>
     public void RestoreGlassAfterMrTransition()
     {
         if (glassMaterialSnapshots.Count == 0)
             CacheMaterialTargets();
 
         RestorePhoneBoothGlass();
+        SetDoorPhoneboothActive(false);
     }
 
     void RestorePhoneBoothGlass()

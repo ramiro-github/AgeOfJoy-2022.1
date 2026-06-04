@@ -540,17 +540,14 @@ public class MixedRealityManager : MonoBehaviour
         ApplyPhoneBoothTravelState(scenePortal, travelState);
         PayphoneHandsetGrab.FinalizeForVrSceneReturn(travelerPortal, scenePortal, handsetPlan);
 
-        yield return MRPhoneBoothPortal.PlayArrivalExplosionClipAndWait(arrivalExplosionClip);
-        if (!IsTransitionCurrent(generation))
-            yield break;
-
-        scenePortal?.NotifyHandsetsTravelComplete();
-
         passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
         ResetLegacyPassthroughFlags();
         SetMode(ExperienceMode.VR);
         MRVrSystemsGate.ResumeForVR();
         PayphoneHandsetGrab.RefreshGrabbedHandVisibility(scenePortal);
+
+        StartCoroutine(MRPhoneBoothPortal.PlayArrivalExplosionClipAndWait(arrivalExplosionClip));
+        scenePortal?.NotifyHandsetsTravelComplete();
 
         MRLayoutRegistry registry = ActiveRegistry();
         MREnvironmentRegistry envRegistry = ActiveEnvironmentRegistry();
