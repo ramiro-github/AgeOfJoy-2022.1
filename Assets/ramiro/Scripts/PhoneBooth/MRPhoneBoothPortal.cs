@@ -15,6 +15,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
     const string HandsetAudioCueObjectName = "AudioCue";
     const string SpaceshipEngineAudioObjectName = "AudioSpaceshipEngine";
     const string ExplosionAudioObjectName = "AudioExplosion";
+    const string ExplosionSmokeObjectName = "ParticleSmoke";
     const string ExteriorSceneName = "IntroGalleryExterior";
     const float DefaultTravelDurationSeconds = 3.5f;
 
@@ -28,6 +29,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
     [SerializeField] AudioSource spaceshipEngineAudio;
     [Tooltip("Child named AudioExplosion — plays when immersive travel finishes (after MR/VR load).")]
     [SerializeField] AudioSource explosionAudio;
+    [Tooltip("Child named ParticleSmoke — burst when arrival explosion plays.")]
+    [SerializeField] ParticleSystem explosionSmoke;
 
     bool isTravelerInstance;
     int playersInside;
@@ -58,6 +61,7 @@ public class MRPhoneBoothPortal : MonoBehaviour
         EnsureHandsetAudioCue();
         EnsureSpaceshipEngineAudio();
         EnsureExplosionAudio();
+        PrepareExplosionSmokeIdle();
         EnsureTravelVfx();
     }
 
@@ -566,6 +570,62 @@ public class MRPhoneBoothPortal : MonoBehaviour
         explosionAudio = FindChildAudioSource(ExplosionAudioObjectName);
     }
 
+    void EnsureExplosionSmoke()
+    {
+        if (explosionSmoke != null)
+            return;
+
+        foreach (Transform child in GetComponentsInChildren<Transform>(true))
+        {
+            if (!string.Equals(child.name, ExplosionSmokeObjectName, System.StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            ParticleSystem smoke = child.GetComponent<ParticleSystem>();
+            if (smoke == null)
+                continue;
+
+            explosionSmoke = smoke;
+            return;
+        }
+    }
+
+    void PrepareExplosionSmokeIdle()
+    {
+        EnsureExplosionSmoke();
+        if (explosionSmoke == null)
+            return;
+
+        explosionSmoke.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        explosionSmoke.gameObject.SetActive(false);
+    }
+
+    void PlayArrivalExplosionSmoke()
+    {
+        EnsureExplosionSmoke();
+        if (explosionSmoke == null)
+        {
+            ConfigManager.WriteConsoleWarning($"{LogPrefix} {ExplosionSmokeObjectName} missing — skipping smoke burst");
+            return;
+        }
+
+        EnsureBoothActiveForArrivalEffects();
+
+        GameObject smokeObject = explosionSmoke.gameObject;
+        if (!smokeObject.activeSelf)
+            smokeObject.SetActive(true);
+
+        explosionSmoke.Clear(true);
+        explosionSmoke.Play(true);
+        MRTransitionLog.LogStep("MRPhoneBoothPortal", "ParticleSmoke play");
+        ConfigManager.WriteConsole($"{LogPrefix} {ExplosionSmokeObjectName} play");
+    }
+
+    void EnsureBoothActiveForArrivalEffects()
+    {
+        if (!gameObject.activeSelf)
+            gameObject.SetActive(true);
+    }
+
     AudioSource FindChildAudioSource(string objectName)
     {
         foreach (Transform child in GetComponentsInChildren<Transform>(true))
@@ -606,7 +666,53 @@ public class MRPhoneBoothPortal : MonoBehaviour
     public IEnumerator PlayTravelArrivalExplosionAndWait()
     {
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "Travel journey end (AudioExplosion)");
-        yield return PlayArrivalExplosionClipAndWait(ResolveExplosionClip());
+        yield return PlayArrivalExplosionAndWait(ResolveExplosionClip(), preferSpatialExplosionAudio: true);
+    }
+
+    /// <summary>Smoke + explosion audio on this booth (or 2D fallback clip).</summary>
+    public IEnumerator PlayArrivalExplosionAndWait(AudioClip fallbackClip, bool preferSpatialExplosionAudio = true)
+    {
+        PlayArrivalExplosionSmoke();
+        EnsureExplosionAudio();
+
+        AudioClip clip = fallbackClip ?? ResolveExplosionClip();
+
+        if (preferSpatialExplosionAudio
+            && explosionAudio != null
+            && explosionAudio.clip != null
+            && gameObject.activeInHierarchy)
+        {
+            yield return PlayAudioSourceAndWait(explosionAudio, ExplosionAudioObjectName);
+            yield break;
+        }
+
+        yield return PlayArrivalExplosionClipAndWait(clip);
+    }
+
+    /// <summary>MR→VR: smoke on the reloaded scene booth + reliable 2D explosion (traveler may be destroyed).</summary>
+    public static IEnumerator PlayArrivalExplosionForVrReturn(MRPhoneBoothPortal scenePortal, AudioClip clip)
+    {
+        scenePortal?.PlayArrivalExplosionSmoke();
+
+        if (clip == null && scenePortal != null)
+            clip = scenePortal.ResolveExplosionClip();
+
+        yield return PlayArrivalExplosionClipAndWait(clip);
+    }
+
+    /// <summary>Arrival burst on a scene/traveler booth; audio falls back to 2D one-shot if needed.</summary>
+    public static IEnumerator PlayArrivalExplosionAndWait(
+        MRPhoneBoothPortal portal,
+        AudioClip fallbackClip,
+        bool preferSpatialExplosionAudio = false)
+    {
+        if (portal != null)
+        {
+            yield return portal.PlayArrivalExplosionAndWait(fallbackClip, preferSpatialExplosionAudio);
+            yield break;
+        }
+
+        yield return PlayArrivalExplosionClipAndWait(fallbackClip);
     }
 
     public AudioClip ResolveExplosionClip()

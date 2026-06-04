@@ -546,7 +546,7 @@ public class MixedRealityManager : MonoBehaviour
         MRVrSystemsGate.ResumeForVR();
         PayphoneHandsetGrab.RefreshGrabbedHandVisibility(scenePortal);
 
-        StartCoroutine(MRPhoneBoothPortal.PlayArrivalExplosionClipAndWait(arrivalExplosionClip));
+        StartCoroutine(MRPhoneBoothPortal.PlayArrivalExplosionForVrReturn(scenePortal, arrivalExplosionClip));
         scenePortal?.NotifyHandsetsTravelComplete();
 
         MRLayoutRegistry registry = ActiveRegistry();
