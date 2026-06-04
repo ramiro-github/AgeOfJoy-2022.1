@@ -142,6 +142,8 @@ public class MRPhoneBoothPortal : MonoBehaviour
             return;
         }
 
+        MixedRealityManager.Instance.RememberVrPlayerPoseForPhoneBoothTravel();
+
         MRTransitionLog.LogStep("MRPhoneBoothPortal", "BeginTravelToMR");
         currentJourneyDirection = PhoneBoothJourneyDirection.ToMR;
         travelCoroutine = StartCoroutine(PlayTravelThen(() =>
@@ -692,6 +694,9 @@ public class MRPhoneBoothPortal : MonoBehaviour
     /// <summary>MR→VR: smoke on the reloaded scene booth + reliable 2D explosion (traveler may be destroyed).</summary>
     public static IEnumerator PlayArrivalExplosionForVrReturn(MRPhoneBoothPortal scenePortal, AudioClip clip)
     {
+        if (scenePortal == null)
+            scenePortal = FindSceneBoothPortal();
+
         scenePortal?.PlayArrivalExplosionSmoke();
 
         if (clip == null && scenePortal != null)
@@ -741,10 +746,12 @@ public class MRPhoneBoothPortal : MonoBehaviour
 
         MRTransitionLog.LogStep("MRPhoneBoothPortal", $"AudioExplosion play clip={clip.name}");
         var oneShotObject = new GameObject("PhoneBoothExplosionOneShot");
+        Object.DontDestroyOnLoad(oneShotObject);
         AudioSource source = oneShotObject.AddComponent<AudioSource>();
         source.clip = clip;
         source.spatialBlend = 0f;
         source.playOnAwake = false;
+        source.volume = 1f;
         source.Play();
 
         float pitch = Mathf.Max(0.01f, Mathf.Abs(source.pitch));

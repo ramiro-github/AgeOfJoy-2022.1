@@ -183,6 +183,12 @@ public class MixedRealityManager : MonoBehaviour
         BeginTransition(EnterMRFromPhoneBoothCoroutine(portal));
     }
 
+    /// <summary>Saves gallery player pose before phone booth VR→MR travel (restored on booth return).</summary>
+    public void RememberVrPlayerPoseForPhoneBoothTravel()
+    {
+        RememberVrPlayerPose();
+    }
+
     /// <summary>Immersive MR→VR via phone booth — scene booth pose is authoritative.</summary>
     public void EnterVRFromPhoneBooth(MRPhoneBoothPortal portal)
     {
@@ -527,28 +533,46 @@ public class MixedRealityManager : MonoBehaviour
         PayphoneHandsetGrab.VrReturnHandsetPlan handsetPlan =
             PayphoneHandsetGrab.CaptureVrReturnPlan(travelerPortal, travelState);
 
+        // Phase 1 — reload VR additive scenes (player rig stays DDOL).
         yield return sceneTransition.ReloadVrScenes();
         if (!IsTransitionCurrent(generation))
             yield break;
 
         MRPhoneBoothExteriorSidewalk.SetSidewalk8Active(true);
 
+        // Phase 2 — gallery player pose (RememberVr at BeginTravelToMR) + handset move to scene booth.
         MRPhoneBoothPortal scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
         AudioClip arrivalExplosionClip =
             MRPhoneBoothPortal.ResolveExplosionClip(scenePortal, travelerPortal);
 
-        ApplyPhoneBoothTravelState(scenePortal, travelState);
+        bool restoredGalleryPose = TryRestoreVrPlayerPose();
+        MRTransitionLog.LogStep("EnterVRFromPhoneBoothCoroutine",
+            restoredGalleryPose ? "after RestoreVrPlayerPose" : "RestoreVrPlayerPose skipped");
+        RefreshPlayerControllerCameraOffset();
+
+        if (!restoredGalleryPose)
+            ApplyPhoneBoothTravelState(scenePortal, travelState);
+
         PayphoneHandsetGrab.FinalizeForVrSceneReturn(travelerPortal, scenePortal, handsetPlan);
 
+        scenePortal = MRPhoneBoothPortal.FindSceneBoothPortal();
+        if (arrivalExplosionClip == null)
+            arrivalExplosionClip = MRPhoneBoothPortal.ResolveExplosionClip(scenePortal, null);
+
+        yield return null;
+
+        // Phase 3 — arrival smoke + 2D explosion (before camera rebind; clip cached before traveler destroy).
+        yield return MRPhoneBoothPortal.PlayArrivalExplosionForVrReturn(scenePortal, arrivalExplosionClip);
+
+        // Phase 4 — VR mode, locomotion, handset settle.
         passthrough.RebindCameraAndDisablePassthrough(playFadeOut: false);
         ResetLegacyPassthroughFlags();
         SetMode(ExperienceMode.VR);
         MRVrSystemsGate.ResumeForVR();
         PayphoneHandsetGrab.RefreshGrabbedHandVisibility(scenePortal);
-
-        StartCoroutine(MRPhoneBoothPortal.PlayArrivalExplosionForVrReturn(scenePortal, arrivalExplosionClip));
         scenePortal?.NotifyHandsetsTravelComplete();
 
+        // Phase 5 — MR teardown.
         MRLayoutRegistry registry = ActiveRegistry();
         MREnvironmentRegistry envRegistry = ActiveEnvironmentRegistry();
         MRVrSystemsGate.StopActiveLibretroGames();
@@ -715,19 +739,37 @@ public class MixedRealityManager : MonoBehaviour
         ConfigManager.WriteConsole($"{LogPrefix} saved VR player pose {savedVrPlayerPosition.Value}");
     }
 
+    void RefreshPlayerControllerCameraOffset()
+    {
+        PlayerController playerController = FindObjectOfType<PlayerController>();
+        if (playerController == null)
+        {
+            MRTransitionLog.LogWarning("RefreshPlayerControllerCameraOffset skipped — PlayerController not found");
+            return;
+        }
+
+        playerController.AdjustCameraYOffset();
+        MRTransitionLog.LogStep("MixedRealityManager", "RefreshPlayerControllerCameraOffset");
+    }
+
     void RestoreVrPlayerPose()
+    {
+        TryRestoreVrPlayerPose();
+    }
+
+    bool TryRestoreVrPlayerPose()
     {
         if (!savedVrPlayerPosition.HasValue)
         {
             MRTransitionLog.LogWarning("RestoreVrPlayerPose skipped — no saved pose");
-            return;
+            return false;
         }
 
         Transform player = FindPlayerTransform();
         if (player == null)
         {
             MRTransitionLog.LogError("RestoreVrPlayerPose failed — player transform null");
-            return;
+            return false;
         }
 
         Quaternion rotation = savedVrPlayerRotation ?? player.rotation;
@@ -737,6 +779,7 @@ public class MixedRealityManager : MonoBehaviour
 
         savedVrPlayerPosition = null;
         savedVrPlayerRotation = null;
+        return true;
     }
 
     void RememberMrPlayerPose()
