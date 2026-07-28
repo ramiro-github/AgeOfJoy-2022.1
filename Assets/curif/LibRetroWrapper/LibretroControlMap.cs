@@ -14,6 +14,14 @@ public class LibretroControlMap : MonoBehaviour
     public bool InvertX = false;
     public bool InvertY = false;
 
+    /// <summary>
+    /// Optional steering-wheel axis from Assets/ramiro (−1…1).
+    /// Digital: JOYPAD left/right early-return. Analog: ReadStick / swanstation ANALOG_X.
+    /// Does not affect lightgun, triggers, or face buttons.
+    /// </summary>
+    [System.NonSerialized] public bool externalSteerActive;
+    [System.NonSerialized] public float externalSteerX;
+
     /*
     public void LoadConfigurationFromFile(string filename)
     {
@@ -77,6 +85,17 @@ public class LibretroControlMap : MonoBehaviour
     public int Active(string mameControl, int port = 0)
     {
         int ret = 0;
+
+        // Steering wheel (ramiro): digital JOYPAD left/right only — leave all other controls untouched.
+        // Low threshold: many PS1 racers (e.g. Ridge Racer) are digital-only; 0.15 felt like ~67° deadzone
+        // with a 450° wheel. Proportional games use ANALOG_X instead of this path.
+        if (externalSteerActive)
+        {
+            if (mameControl == "JOYPAD_RIGHT")
+                return externalSteerX > 0.04f ? 1 : 0;
+            if (mameControl == "JOYPAD_LEFT")
+                return externalSteerX < -0.04f ? 1 : 0;
+        }
 
         if (!actionMap.enabled)
             return 0;
@@ -236,6 +255,15 @@ public class LibretroControlMap : MonoBehaviour
         {
             if (InvertX) v.x = -v.x;
             if (InvertY) v.y = -v.y;
+            // Flycast ReadStick + swanstation analog fallback: wheel overrides stick X only.
+            if (externalSteerActive
+                && (mameControl == LibretroControlMapDictionnary.JOYPAD_UP
+                    || mameControl == LibretroControlMapDictionnary.JOYPAD_DOWN
+                    || mameControl == LibretroControlMapDictionnary.JOYPAD_LEFT
+                    || mameControl == LibretroControlMapDictionnary.JOYPAD_RIGHT))
+            {
+                v.x = Mathf.Clamp(externalSteerX, -1f, 1f);
+            }
             return v;
         }
         if (result is float f)

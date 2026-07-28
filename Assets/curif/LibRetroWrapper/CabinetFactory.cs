@@ -618,6 +618,7 @@ public static class CabinetFactory
             }
         }
 
+        CabinetSteeringWheelSpawner.TryAttach(cabinet, cbinfo);
         return cabinet;
     }
 

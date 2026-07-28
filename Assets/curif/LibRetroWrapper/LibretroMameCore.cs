@@ -55,6 +55,9 @@ public static unsafe class LibretroMameCore
 
     public const uint RETRO_DEVICE_ID_ANALOG_X = 0;
     public const uint RETRO_DEVICE_ID_ANALOG_Y = 1;
+    public const uint RETRO_DEVICE_INDEX_ANALOG_LEFT = 0;
+    public const uint RETRO_DEVICE_INDEX_ANALOG_RIGHT = 1;
+    public const uint RETRO_DEVICE_INDEX_ANALOG_BUTTON = 2;
 
     public const uint RETRO_DEVICE_ID_MOUSE_X = 0;
     public const uint RETRO_DEVICE_ID_MOUSE_Y = 1;
@@ -683,7 +686,7 @@ public static unsafe class LibretroMameCore
         foreach (var device in libretroInputDevices)
         {
             uint port = device.Key;
-            uint deviceId = device.Value.Id;
+            uint deviceId = RemapControllerDeviceIdForCore(device.Value.Id);
             string deviceName = device.Value.Name;
             WriteConsole($"[LibRetroMameCore.Start] Setting controller port device {port} to {deviceName}:{deviceId}");
             wrapper_set_controller_port_device(port, deviceId);
@@ -1707,6 +1710,12 @@ public static unsafe class LibretroMameCore
         {
             ret = inputStateCB_GamePad(port, device, index, id);
         }
+        else if ((device & 0xffu) == LibretroInputDevice.Analog.Id)
+        {
+            // DualShock / RETRO_DEVICE_ANALOG (+ subclasses). Same idea as Flycast ReadStick:
+            // Quest thumbstick via ControlMap.ReadStick, or steering-wheel override on X.
+            ret = inputStateCB_Analog(port, index, id);
+        }
         else if (device == LibretroInputDevice.Mouse.Id)
         {
             ret = inputStateCB_Mouse(port, device, index, id);
@@ -1729,6 +1738,73 @@ public static unsafe class LibretroMameCore
 #endif
 
         return ret;
+    }
+
+    /// <summary>
+    /// AOJ / PCSX ReARMed / Beetle: DualShock = SUBCLASS(ANALOG, 1), Analog = SUBCLASS(ANALOG, 0).
+    /// SwanStation swaps those two (DualShock = 0, AnalogJoystick = 1). Without remapping,
+    /// YAML <c>psx_dual_shock</c> becomes a flight stick and games stop reading Quest buttons.
+    /// </summary>
+    private static uint RemapControllerDeviceIdForCore(uint deviceId)
+    {
+        if (string.IsNullOrEmpty(Core) || !Core.StartsWith("swanstation", StringComparison.OrdinalIgnoreCase))
+            return deviceId;
+
+        if (deviceId == LibretroInputDevice.PsxDualShock.Id)
+            return LibretroInputDevice.PsxAnalog.Id;
+        if (deviceId == LibretroInputDevice.PsxAnalog.Id)
+            return LibretroInputDevice.PsxDualShock.Id;
+        return deviceId;
+    }
+
+    /// <summary>
+    /// Proportional sticks / NeGcon axes [-0x7fff, 0x7fff].
+    /// Stick polls use INDEX_LEFT/RIGHT + ANALOG_X/Y.
+    /// NeGcon I/II/L use INDEX_ANALOG_BUTTON + JOYPAD_* ids — those numeric ids collide with
+    /// ANALOG_X/Y (B=0, Y=1), so button polls must not take the stick/steering path
+    /// (otherwise turning right pumps NeGcon I / accelerate).
+    /// </summary>
+    private static Int16 inputStateCB_Analog(uint port, uint index, uint id)
+    {
+        if (ControlMap == null)
+            return 0;
+
+        if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT || index == RETRO_DEVICE_INDEX_ANALOG_RIGHT)
+        {
+            // AOJ: left stick → control-map port 0, right stick → port 1.
+            int mapPort = index == RETRO_DEVICE_INDEX_ANALOG_RIGHT ? 1 : 0;
+
+            if (id == RETRO_DEVICE_ID_ANALOG_X)
+            {
+                if (ControlMap.externalSteerActive)
+                {
+                    return (Int16)Mathf.Clamp(
+                        Mathf.RoundToInt(ControlMap.externalSteerX * 0x7fff),
+                        -0x7fff,
+                        0x7fff);
+                }
+
+                ControlMap.ReadStick(out short x, out _, mapPort);
+                return x;
+            }
+
+            if (id == RETRO_DEVICE_ID_ANALOG_Y)
+            {
+                ControlMap.ReadStick(out _, out short y, mapPort);
+                return y;
+            }
+
+            return 0;
+        }
+
+        // NeGcon I = JOYPAD_B, II = JOYPAD_Y, L = JOYPAD_L (pressure or digital full-press).
+        if (index == RETRO_DEVICE_INDEX_ANALOG_BUTTON && deviceIdsJoypad != null)
+        {
+            int mapPort = port == activePlayerSlot ? 0 : (int)port;
+            return deviceIdsJoypad.Active(id, mapPort) != 0 ? (Int16)0x7fff : (Int16)0;
+        }
+
+        return 0;
     }
 
     private static Int16 inputStateCB_GamePad(uint port, uint device, uint index, uint id)
