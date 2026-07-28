@@ -8,8 +8,9 @@ using UnityEngine.XR;
 using UnityEngine.XR.Interaction.Toolkit;
 
 /// <summary>
-/// VR steering wheel: hold with one or two hands via the <b>index triggers</b> (not grip).
+/// VR steering wheel on a cabinet part: hold with one or two hands via the <b>index triggers</b> (not grip).
 /// Position stays fixed; only rotates around a local axis. Uses hover + trigger so XR never reparents the wheel.
+/// Wired onto the existing GLB <c>steering-wheel</c> mesh by <see cref="CabinetSteeringWheelSpawner"/>.
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Rigidbody))]
@@ -25,8 +26,8 @@ public class SteeringWheel : MonoBehaviour
     [SerializeField] Vector3 localRotationAxis = Vector3.forward;
 
     [Header("Limits")]
-    [Tooltip("Maximum turn from center, in degrees (e.g. 450 ≈ 1.25 turns each way).")]
-    [SerializeField] float maxAngleDegrees = 450f;
+    [Tooltip("Maximum turn from center, in degrees (e.g. 90 each way).")]
+    [SerializeField] float maxAngleDegrees = 90f;
     [Tooltip("Degrees per second back to center when released. 0 = leave the wheel where it was.")]
     [SerializeField] float returnSpeedDegrees = 180f;
     [Tooltip("Smooth applied rotation (0 = instant).")]
@@ -256,6 +257,48 @@ public class SteeringWheel : MonoBehaviour
         displayedAngle = 0f;
     }
 
+    /// <summary>
+    /// YAML <c>rotation-axis</c>: x/y/z or right/up/forward. Empty keeps current axis (default Forward/Z).
+    /// </summary>
+    public void SetLocalRotationAxisFromYaml(string axisName)
+    {
+        if (string.IsNullOrWhiteSpace(axisName))
+            return;
+
+        switch (axisName.Trim().ToLowerInvariant())
+        {
+            case "x":
+            case "right":
+                localRotationAxis = Vector3.right;
+                break;
+            case "y":
+            case "up":
+                localRotationAxis = Vector3.up;
+                break;
+            case "z":
+            case "forward":
+                localRotationAxis = Vector3.forward;
+                break;
+            default:
+                ConfigManager.WriteConsoleWarning(
+                    $"{LogPrefix} unknown rotation-axis '{axisName}' (use x/y/z or right/up/forward)");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// YAML <c>max-angle</c>: max degrees from center each way. Ignored if null or &lt;= 0.
+    /// </summary>
+    public void SetMaxAngleDegreesFromYaml(float? degrees)
+    {
+        if (!degrees.HasValue || degrees.Value <= 0f)
+            return;
+
+        maxAngleDegrees = degrees.Value;
+        currentAngle = Mathf.Clamp(currentAngle, -maxAngleDegrees, maxAngleDegrees);
+        displayedAngle = Mathf.Clamp(displayedAngle, -maxAngleDegrees, maxAngleDegrees);
+    }
+
     void ConfigureRigidbody()
     {
         body.isKinematic = true;
@@ -266,9 +309,13 @@ public class SteeringWheel : MonoBehaviour
     void EnsureInteractionCollider()
     {
         // MeshCollider (even convex) is unreliable for XR Direct hover on detailed rims.
-        MeshCollider mesh = GetComponent<MeshCollider>();
-        if (mesh != null)
-            mesh.enabled = false;
+        // Cabinet GLBs often put the mesh collider on a child of the named part.
+        MeshCollider[] meshes = GetComponentsInChildren<MeshCollider>(true);
+        for (int i = 0; i < meshes.Length; i++)
+        {
+            if (meshes[i] != null)
+                meshes[i].enabled = false;
+        }
 
         interactionCollider = GetComponent<SphereCollider>();
         if (interactionCollider == null)
@@ -286,7 +333,7 @@ public class SteeringWheel : MonoBehaviour
 
             Vector3 localCenter = transform.InverseTransformPoint(bounds.center);
             Vector3 localExtents = transform.InverseTransformVector(bounds.extents);
-            float radius = Mathf.Max(localExtents.x, localExtents.y, localExtents.z);
+            float radius = Mathf.Max(Mathf.Abs(localExtents.x), Mathf.Abs(localExtents.y), Mathf.Abs(localExtents.z));
             interactionCollider.center = localCenter;
             interactionCollider.radius = Mathf.Max(0.05f, radius * 0.85f);
         }

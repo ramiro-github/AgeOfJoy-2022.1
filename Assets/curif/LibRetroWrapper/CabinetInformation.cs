@@ -431,6 +431,18 @@ public class CabinetInformation
         public bool istarget = false; //lightgun
         public Physical physical;
 
+        /// <summary>
+        /// Optional local spin axis for steering-wheel parts: x/y/z or right/up/forward.
+        /// </summary>
+        [YamlMember(Alias = "rotation-axis", ApplyNamingConventions = false)]
+        public string rotationAxis;
+
+        /// <summary>
+        /// Optional max turn from center in degrees for steering-wheel parts (default 90 in SteeringWheel).
+        /// </summary>
+        [YamlMember(Alias = "max-angle", ApplyNamingConventions = false)]
+        public float? maxAngle;
+
         [YamlMember(Alias = "material-properties", ApplyNamingConventions = false)]
         public Dictionary<string, string> properties = new Dictionary<string, string>();
 
