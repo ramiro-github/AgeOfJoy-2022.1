@@ -16,11 +16,14 @@ public class LibretroControlMap : MonoBehaviour
 
     /// <summary>
     /// Optional steering-wheel axis from Assets/ramiro (−1…1).
-    /// Digital: JOYPAD left/right early-return. Analog: ReadStick / swanstation ANALOG_X.
+    /// Digital: JOYPAD left/right early-return when <see cref="externalSteerDigital"/>.
+    /// Analog: ReadStick / swanstation ANALOG_X.
     /// Does not affect lightgun, triggers, or face buttons.
     /// </summary>
     [System.NonSerialized] public bool externalSteerActive;
     [System.NonSerialized] public float externalSteerX;
+    /// <summary>When true, wheel also drives JOYPAD_LEFT/RIGHT (digital). Off for NeGcon / pure analog.</summary>
+    [System.NonSerialized] public bool externalSteerDigital = true;
 
     /*
     public void LoadConfigurationFromFile(string filename)
@@ -86,10 +89,10 @@ public class LibretroControlMap : MonoBehaviour
     {
         int ret = 0;
 
-        // Steering wheel (ramiro): digital JOYPAD left/right only — leave all other controls untouched.
-        // Low threshold: many PS1 racers (e.g. Ridge Racer) are digital-only; 0.15 felt like ~67° deadzone
-        // with a 450° wheel. Proportional games use ANALOG_X instead of this path.
-        if (externalSteerActive)
+        // Steering wheel (ramiro): optional digital JOYPAD left/right.
+        // Analog racers (NeGcon / DualShock stick) must keep this off — otherwise ~4° of wheel
+        // already asserts full L/R and the car snaps to full lock while ANALOG_X is still small.
+        if (externalSteerActive && externalSteerDigital)
         {
             if (mameControl == "JOYPAD_RIGHT")
                 return externalSteerX > 0.04f ? 1 : 0;

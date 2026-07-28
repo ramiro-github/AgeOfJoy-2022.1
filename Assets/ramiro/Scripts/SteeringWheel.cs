@@ -42,6 +42,10 @@ public class SteeringWheel : MonoBehaviour
     [Header("Game input")]
     [Tooltip("Maps wheel angle to thumbstick X (right stick / JOYPAD left-right). Invert if turn direction feels wrong.")]
     [SerializeField] bool invertSteering;
+    [Tooltip("Multiplies normalized wheel axis before clamp ±1. >1 reaches full stick sooner (YAML steer-gain).")]
+    [SerializeField] float steerGain = 1f;
+    [Tooltip("Also press JOYPAD left/right from the wheel. Disable for NeGcon / proportional racers (YAML steer-digital).")]
+    [SerializeField] bool steerDigital = true;
     [Tooltip("Keep feeding axis while the wheel springs back to center.")]
     [SerializeField] bool driveAxisWhileReturning = true;
 
@@ -117,6 +121,7 @@ public class SteeringWheel : MonoBehaviour
         }
 
         float axisX = invertSteering ? NormalizedValue : -NormalizedValue;
+        axisX = Mathf.Clamp(axisX * steerGain, -1f, 1f);
 
         // VR/MR: only one libretro game runs at a time. Always write the maps the cores poll
         // (deviceIdsJoypad.controlMap == LibretroMameCore.ControlMap). Do not gate on cabinet
@@ -146,6 +151,7 @@ public class SteeringWheel : MonoBehaviour
 
         map.externalSteerX = axisX;
         map.externalSteerActive = true;
+        map.externalSteerDigital = steerDigital;
     }
 
     void ClearControlMapOverride()
@@ -162,6 +168,7 @@ public class SteeringWheel : MonoBehaviour
 
         map.externalSteerX = 0f;
         map.externalSteerActive = false;
+        map.externalSteerDigital = true;
     }
 
     LibretroControlMap ResolveControlMap()
@@ -297,6 +304,29 @@ public class SteeringWheel : MonoBehaviour
         maxAngleDegrees = degrees.Value;
         currentAngle = Mathf.Clamp(currentAngle, -maxAngleDegrees, maxAngleDegrees);
         displayedAngle = Mathf.Clamp(displayedAngle, -maxAngleDegrees, maxAngleDegrees);
+    }
+
+    /// <summary>
+    /// YAML <c>steer-gain</c>: multiplies normalized axis before clamp ±1. Ignored if null or &lt;= 0.
+    /// </summary>
+    public void SetSteerGainFromYaml(float? gain)
+    {
+        if (!gain.HasValue || gain.Value <= 0f)
+            return;
+
+        steerGain = gain.Value;
+    }
+
+    /// <summary>
+    /// YAML <c>steer-digital</c>: when true, wheel also asserts JOYPAD left/right.
+    /// Set false for NeGcon / DualShock proportional steering.
+    /// </summary>
+    public void SetSteerDigitalFromYaml(bool? digital)
+    {
+        if (!digital.HasValue)
+            return;
+
+        steerDigital = digital.Value;
     }
 
     void ConfigureRigidbody()

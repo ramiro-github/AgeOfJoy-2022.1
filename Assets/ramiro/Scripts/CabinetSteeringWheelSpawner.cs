@@ -8,7 +8,8 @@ using UnityEngine;
 /// If cabinet <c>description.yaml</c> lists <c>steering-wheel</c>, finds that part on the
 /// cabinet GLB and makes it interactive (adds <see cref="SteeringWheel"/>). No prefab spawn —
 /// the cabinet mesh itself is the wheel. Legacy alias <c>steeringwheel</c> is still accepted.
-/// Optional part fields: <c>rotation-axis</c> (x/y/z), <c>max-angle</c> (degrees each way).
+/// Optional part fields: <c>rotation-axis</c> (x/y/z), <c>max-angle</c> (degrees each way),
+/// <c>steer-gain</c> (axis multiplier, default 1), <c>steer-digital</c> (JOYPAD L/R, default true).
 /// </summary>
 public static class CabinetSteeringWheelSpawner
 {
@@ -47,11 +48,15 @@ public static class CabinetSteeringWheelSpawner
 
         steering.SetLocalRotationAxisFromYaml(wheelPart.rotationAxis);
         steering.SetMaxAngleDegreesFromYaml(wheelPart.maxAngle);
+        steering.SetSteerGainFromYaml(wheelPart.steerGain);
+        steering.SetSteerDigitalFromYaml(wheelPart.steerDigital);
         steering.CaptureHomePose();
 
         ConfigManager.WriteConsole(
             $"{LogPrefix} using cabinet part '{wheel.name}' on '{cabInfo.name}' " +
             $"axis={wheelPart.rotationAxis ?? "forward"} maxAngle={wheelPart.maxAngle?.ToString() ?? "default"} " +
+            $"steerGain={wheelPart.steerGain?.ToString() ?? "default"} " +
+            $"steerDigital={wheelPart.steerDigital?.ToString() ?? "default"} " +
             $"pos={wheel.position} rot={wheel.eulerAngles}");
     }
 

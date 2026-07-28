@@ -443,6 +443,19 @@ public class CabinetInformation
         [YamlMember(Alias = "max-angle", ApplyNamingConventions = false)]
         public float? maxAngle;
 
+        /// <summary>
+        /// Optional axis multiplier for steering-wheel parts (default 1). Values &gt; 1 fill the stick earlier.
+        /// </summary>
+        [YamlMember(Alias = "steer-gain", ApplyNamingConventions = false)]
+        public float? steerGain;
+
+        /// <summary>
+        /// When true (default), steering-wheel also presses JOYPAD left/right.
+        /// Set false for NeGcon / proportional analog racers.
+        /// </summary>
+        [YamlMember(Alias = "steer-digital", ApplyNamingConventions = false)]
+        public bool? steerDigital;
+
         [YamlMember(Alias = "material-properties", ApplyNamingConventions = false)]
         public Dictionary<string, string> properties = new Dictionary<string, string>();
 
