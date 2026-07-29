@@ -51,6 +51,8 @@ public static class CabinetSteeringWheelSpawner
         steering.SetSteerGainFromYaml(wheelPart.steerGain);
         steering.SetSteerDigitalFromYaml(wheelPart.steerDigital);
         steering.CaptureHomePose();
+        // Decorative until this cabinet's LibretroControlMap is enabled (play session).
+        steering.SetInteractionEnabled(false);
 
         ConfigManager.WriteConsole(
             $"{LogPrefix} using cabinet part '{wheel.name}' on '{cabInfo.name}' " +

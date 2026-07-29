@@ -89,6 +89,18 @@ public class LibretroControlMap : MonoBehaviour
     {
         int ret = 0;
 
+        // Left grip = MODIFIER (mutes all game input in LibretroMameCore) and JOYPAD_L2;
+        // right grip = JOYPAD_R2 / EXIT. Steering-wheel grab uses grips — suppress those
+        // bindings while holding so grab does not accelerate (L2/R2) or mute buttons.
+        if (SteeringWheel.IsAnyHandHolding
+            && (mameControl == "MODIFIER"
+                || mameControl == LibretroControlMapDictionnary.MODIFIER
+                || mameControl == "JOYPAD_L2"
+                || mameControl == LibretroControlMapDictionnary.JOYPAD_L2
+                || mameControl == "JOYPAD_R2"
+                || mameControl == LibretroControlMapDictionnary.JOYPAD_R2))
+            return 0;
+
         // Steering wheel (ramiro): optional digital JOYPAD left/right.
         // Analog racers (NeGcon / DualShock stick) must keep this off — otherwise ~4° of wheel
         // already asserts full L/R and the car snaps to full lock while ANALOG_X is still small.

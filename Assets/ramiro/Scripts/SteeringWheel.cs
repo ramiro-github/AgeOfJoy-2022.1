@@ -8,8 +8,9 @@ using UnityEngine.XR;
 using UnityEngine.XR.Interaction.Toolkit;
 
 /// <summary>
-/// VR steering wheel on a cabinet part: hold with one or two hands via the <b>index triggers</b> (not grip).
-/// Position stays fixed; only rotates around a local axis. Uses hover + trigger so XR never reparents the wheel.
+/// VR steering wheel on a cabinet part: hold with one or two hands via the <b>grip</b> buttons
+/// (not index trigger — free for game inputs like GT rear-view).
+/// Position stays fixed; only rotates around a local axis. Uses hover + grip so XR never reparents the wheel.
 /// Wired onto the existing GLB <c>steering-wheel</c> mesh by <see cref="CabinetSteeringWheelSpawner"/>.
 /// </summary>
 [DisallowMultipleComponent]
@@ -20,6 +21,12 @@ public class SteeringWheel : MonoBehaviour
     const string LogPrefix = "[SteeringWheel]";
     static readonly string[] GrabInteractionLayers = { "InteractablePart" };
     const string GrabPhysicsLayerName = "InteractablePart";
+
+    /// <summary>True while any steering wheel in the scene has at least one hand holding it.</summary>
+    public static bool IsAnyHandHolding { get; private set; }
+
+    static int holdSessionCount;
+    bool holdSessionActive;
 
     [Header("Axis")]
     [Tooltip("Local axis the wheel spins around (Forward = face of a typical rim).")]
@@ -33,9 +40,9 @@ public class SteeringWheel : MonoBehaviour
     [Tooltip("Smooth applied rotation (0 = instant).")]
     [SerializeField] float rotationSmoothing = 18f;
 
-    [Header("Grab (index trigger)")]
-    [SerializeField] float triggerPressThreshold = 0.55f;
-    [SerializeField] float triggerReleaseThreshold = 0.35f;
+    [Header("Grab (grip)")]
+    [SerializeField] float gripPressThreshold = 0.55f;
+    [SerializeField] float gripReleaseThreshold = 0.35f;
     [SerializeField] bool hideHandsOnGrab = true;
     [SerializeField] bool logDebug;
 
@@ -49,10 +56,14 @@ public class SteeringWheel : MonoBehaviour
     [Tooltip("Keep feeding axis while the wheel springs back to center.")]
     [SerializeField] bool driveAxisWhileReturning = true;
 
+    /// <summary>When false, XR grab and game axis are off (cabinet idle until play session).</summary>
+    bool interactionEnabled = true;
+
     XRSimpleInteractable hoverInteractable;
     Rigidbody body;
     SphereCollider interactionCollider;
     LibretroControlMap controlMap;
+    LibretroControlMap localControlMap;
 
     Vector3 homeLocalPosition;
     Quaternion homeLocalRotation;
@@ -82,6 +93,110 @@ public class SteeringWheel : MonoBehaviour
 
     public bool IsGrabbed => heldHands.Count > 0;
 
+    public bool InteractionEnabled => interactionEnabled;
+
+    /// <summary>
+    /// Enable/disable grab + axis output. Components stay attached; idle cabinets keep the wheel decorative.
+    /// Driven from this cabinet's control-map enable (play session) — no hooks in curif controllers.
+    /// </summary>
+    public void SetInteractionEnabled(bool enabled)
+    {
+        if (interactionEnabled == enabled)
+        {
+            ApplyInteractionHardware(enabled);
+            return;
+        }
+
+        interactionEnabled = enabled;
+
+        if (!enabled)
+            ForceReleaseAndReset();
+
+        ApplyInteractionHardware(enabled);
+
+        if (logDebug)
+            ConfigManager.WriteConsole($"{LogPrefix} interaction={(enabled ? "on" : "off")}");
+    }
+
+    void ApplyInteractionHardware(bool enabled)
+    {
+        if (hoverInteractable != null)
+            hoverInteractable.enabled = enabled;
+
+        if (interactionCollider != null)
+            interactionCollider.enabled = enabled;
+    }
+
+    void ForceReleaseAndReset()
+    {
+        for (int i = heldHands.Count - 1; i >= 0; i--)
+            EndHoldAt(i);
+
+        hovering.Clear();
+        hasPreviousHandsAngle = false;
+        ClearControlMapOverride();
+        currentAngle = 0f;
+        displayedAngle = 0f;
+        ApplyPose(0f);
+        RestoreAllHandVisuals();
+    }
+
+    /// <summary>
+    /// Mirror this cabinet's <see cref="LibretroControlMap"/> enable flag (set when a coin starts play).
+    /// </summary>
+    void SyncInteractionToPlaySession()
+    {
+        if (localControlMap == null)
+            localControlMap = FindLocalControlMap();
+
+        bool playing = localControlMap != null
+            && localControlMap.actionMap != null
+            && localControlMap.actionMap.enabled;
+
+        if (playing != interactionEnabled)
+            SetInteractionEnabled(playing);
+    }
+
+    LibretroControlMap FindLocalControlMap()
+    {
+        // Prefer the map on this cabinet's screen — not the global active-core pointer.
+        Transform node = transform;
+        while (node != null)
+        {
+            LibretroScreenController screen = node.GetComponentInChildren<LibretroScreenController>(true);
+            if (screen != null)
+            {
+                LibretroControlMap onScreen = screen.GetComponent<LibretroControlMap>();
+                if (onScreen != null)
+                    return onScreen;
+            }
+
+            AGEBasicScreenController ageScreen = node.GetComponentInChildren<AGEBasicScreenController>(true);
+            if (ageScreen != null)
+            {
+                LibretroControlMap onAge = ageScreen.GetComponent<LibretroControlMap>();
+                if (onAge != null)
+                    return onAge;
+            }
+
+            AGEBasicCabinetController ageCab = node.GetComponentInChildren<AGEBasicCabinetController>(true);
+            if (ageCab != null)
+            {
+                LibretroControlMap onAgeCab = ageCab.GetComponent<LibretroControlMap>();
+                if (onAgeCab != null)
+                    return onAgeCab;
+            }
+
+            LibretroControlMap any = node.GetComponentInChildren<LibretroControlMap>(true);
+            if (any != null)
+                return any;
+
+            node = node.parent;
+        }
+
+        return GetComponentInParent<LibretroControlMap>();
+    }
+
     void Awake()
     {
         body = GetComponent<Rigidbody>();
@@ -96,11 +211,14 @@ public class SteeringWheel : MonoBehaviour
     {
         CaptureHomePose();
         ApplyPose(displayedAngle);
+        localControlMap = FindLocalControlMap();
+        SyncInteractionToPlaySession();
     }
 
     void OnDestroy()
     {
         ClearControlMapOverride();
+        NotifyHoldSessionEnded();
 
         if (hoverInteractable == null)
             return;
@@ -216,11 +334,19 @@ public class SteeringWheel : MonoBehaviour
 
     void Update()
     {
-        UpdateTriggerHolds();
+        SyncInteractionToPlaySession();
+
+        if (!interactionEnabled)
+            return;
+
+        UpdateGripHolds();
     }
 
     void LateUpdate()
     {
+        if (!interactionEnabled)
+            return;
+
         if (IsGrabbed)
         {
             UpdateHeldAngle();
@@ -391,7 +517,7 @@ public class SteeringWheel : MonoBehaviour
         if (physicsLayer >= 0)
             gameObject.layer = physicsLayer;
 
-        // Select unused — grab is driven by index trigger while hovering.
+        // Select unused — grab is driven by grip while hovering.
         interactable.selectMode = InteractableSelectMode.Multiple;
         interactable.interactionLayers = InteractionLayerMask.GetMask(GrabInteractionLayers);
         interactable.colliders.Clear();
@@ -414,24 +540,24 @@ public class SteeringWheel : MonoBehaviour
         hovering.Remove(args.interactorObject);
     }
 
-    void UpdateTriggerHolds()
+    void UpdateGripHolds()
     {
-        // Start hold: hovering + trigger pressed.
+        // Start hold: hovering + grip pressed.
         for (int i = 0; i < hovering.Count; i++)
         {
             IXRHoverInteractor interactor = hovering[i];
             if (interactor == null || IsHolding(interactor))
                 continue;
 
-            if (ReadTrigger(interactor) >= triggerPressThreshold)
+            if (ReadGrip(interactor) >= gripPressThreshold)
                 BeginHold(interactor);
         }
 
-        // End hold: trigger released (can leave hover while still holding).
+        // End hold: grip released (can leave hover while still holding).
         for (int i = heldHands.Count - 1; i >= 0; i--)
         {
             HeldHand held = heldHands[i];
-            if (held.Interactor == null || ReadTrigger(held.Interactor) <= triggerReleaseThreshold)
+            if (held.Interactor == null || ReadGrip(held.Interactor) <= gripReleaseThreshold)
                 EndHoldAt(i);
         }
     }
@@ -442,6 +568,7 @@ public class SteeringWheel : MonoBehaviour
         if (follow == null)
             return;
 
+        bool wasEmpty = heldHands.Count == 0;
         bool isLeft = IsLeftInteractor(interactor);
         heldHands.Add(new HeldHand
         {
@@ -450,6 +577,9 @@ public class SteeringWheel : MonoBehaviour
             IsLeft = isLeft,
         });
         hasPreviousHandsAngle = false;
+
+        if (wasEmpty)
+            NotifyHoldSessionStarted();
 
         if (hideHandsOnGrab)
             StartCoroutine(HideHandVisualsNextFrame(interactor, isLeft));
@@ -475,6 +605,7 @@ public class SteeringWheel : MonoBehaviour
             // Do not call PayphoneHandsetGrab.ForceShowPlayerHands() — it runs PlayerMode(false)
             // and exits cabinet play (breaks Quest buttons + can clear ControlMap).
             RestoreAllHandVisuals();
+            NotifyHoldSessionEnded();
         }
 
         Log($"hold end left={held.IsLeft} count={heldHands.Count}");
@@ -607,7 +738,7 @@ public class SteeringWheel : MonoBehaviour
         return Vector3.Cross(n, candidate).normalized;
     }
 
-    static float ReadTrigger(IXRInteractor interactor)
+    static float ReadGrip(IXRInteractor interactor)
     {
         var behaviour = interactor as MonoBehaviour;
         if (behaviour == null)
@@ -618,11 +749,11 @@ public class SteeringWheel : MonoBehaviour
         {
             try
             {
-                var valueAction = controller.activateActionValue.action;
+                var valueAction = controller.selectActionValue.action;
                 if (valueAction != null)
                     return Mathf.Clamp01(valueAction.ReadValue<float>());
 
-                var buttonAction = controller.activateAction.action;
+                var buttonAction = controller.selectAction.action;
                 if (buttonAction != null && buttonAction.IsPressed())
                     return 1f;
             }
@@ -635,10 +766,30 @@ public class SteeringWheel : MonoBehaviour
         bool isLeft = IsLeftInteractor(interactor);
         XRNode node = isLeft ? XRNode.LeftHand : XRNode.RightHand;
         InputDevice device = InputDevices.GetDeviceAtXRNode(node);
-        if (device.isValid && device.TryGetFeatureValue(CommonUsages.trigger, out float axis))
+        if (device.isValid && device.TryGetFeatureValue(CommonUsages.grip, out float axis))
             return Mathf.Clamp01(axis);
 
         return 0f;
+    }
+
+    void NotifyHoldSessionStarted()
+    {
+        if (holdSessionActive)
+            return;
+
+        holdSessionActive = true;
+        holdSessionCount++;
+        IsAnyHandHolding = holdSessionCount > 0;
+    }
+
+    void NotifyHoldSessionEnded()
+    {
+        if (!holdSessionActive)
+            return;
+
+        holdSessionActive = false;
+        holdSessionCount = Mathf.Max(0, holdSessionCount - 1);
+        IsAnyHandHolding = holdSessionCount > 0;
     }
 
     static Transform ResolveFollowTransform(IXRInteractor interactor)

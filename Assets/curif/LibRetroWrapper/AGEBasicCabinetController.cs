@@ -318,6 +318,8 @@ public class AGEBasicCabinetController : MonoBehaviour, ISuspendableCabinetScree
                         .Sequence("Manual Exit")
                             .Condition("user EXIT pressed?", () =>
                             {
+                                if (SteeringWheel.IsAnyHandHolding)
+                                    return false;
                                 if (libretroControlMap.isActive(LC.EXIT))
                                     return true;
 #if UNITY_EDITOR

@@ -419,6 +419,8 @@ public class AGEBasicScreenController : MonoBehaviour, ISuspendableCabinetScreen
                         .Sequence("Manual Exit")
                             .Condition("user EXIT or not running anymore?", () =>
                             {
+                                if (SteeringWheel.IsAnyHandHolding)
+                                    return false;
                                 if (libretroControlMap.isActive(LC.EXIT))
                                     return true;
 #if UNITY_EDITOR
