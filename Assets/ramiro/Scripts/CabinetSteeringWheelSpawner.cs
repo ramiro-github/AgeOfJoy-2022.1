@@ -9,7 +9,8 @@ using UnityEngine;
 /// cabinet GLB and makes it interactive (adds <see cref="SteeringWheel"/>). No prefab spawn —
 /// the cabinet mesh itself is the wheel. Legacy alias <c>steeringwheel</c> is still accepted.
 /// Optional part fields: <c>rotation-axis</c> (x/y/z), <c>max-angle</c> (degrees each way),
-/// <c>steer-gain</c> (axis multiplier, default 1), <c>steer-digital</c> (JOYPAD L/R, default true).
+/// <c>steer-gain</c> (axis multiplier, default 1), <c>steer-anti-deadzone</c> (0–1, default 0),
+/// <c>steer-digital</c> (JOYPAD L/R, default true).
 /// </summary>
 public static class CabinetSteeringWheelSpawner
 {
@@ -49,6 +50,7 @@ public static class CabinetSteeringWheelSpawner
         steering.SetLocalRotationAxisFromYaml(wheelPart.rotationAxis);
         steering.SetMaxAngleDegreesFromYaml(wheelPart.maxAngle);
         steering.SetSteerGainFromYaml(wheelPart.steerGain);
+        steering.SetSteerAntiDeadzoneFromYaml(wheelPart.steerAntiDeadzone);
         steering.SetSteerDigitalFromYaml(wheelPart.steerDigital);
         steering.CaptureHomePose();
         // Decorative until this cabinet's LibretroControlMap is enabled (play session).
@@ -58,6 +60,7 @@ public static class CabinetSteeringWheelSpawner
             $"{LogPrefix} using cabinet part '{wheel.name}' on '{cabInfo.name}' " +
             $"axis={wheelPart.rotationAxis ?? "forward"} maxAngle={wheelPart.maxAngle?.ToString() ?? "default"} " +
             $"steerGain={wheelPart.steerGain?.ToString() ?? "default"} " +
+            $"steerAntiDz={wheelPart.steerAntiDeadzone?.ToString() ?? "default"} " +
             $"steerDigital={wheelPart.steerDigital?.ToString() ?? "default"} " +
             $"pos={wheel.position} rot={wheel.eulerAngles}");
     }

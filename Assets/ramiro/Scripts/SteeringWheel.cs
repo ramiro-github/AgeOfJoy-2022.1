@@ -51,6 +51,8 @@ public class SteeringWheel : MonoBehaviour
     [SerializeField] bool invertSteering;
     [Tooltip("Multiplies normalized wheel axis before clamp ±1. >1 reaches full stick sooner (YAML steer-gain).")]
     [SerializeField] float steerGain = 1f;
+    [Tooltip("When >0, remaps non-zero axis to start at this magnitude (0–1) to beat game stick deadzones (YAML steer-anti-deadzone).")]
+    [SerializeField] [Range(0f, 0.95f)] float steerAntiDeadzone = 0f;
     [Tooltip("Also press JOYPAD left/right from the wheel. Disable for NeGcon / proportional racers (YAML steer-digital).")]
     [SerializeField] bool steerDigital = true;
     [Tooltip("Keep feeding axis while the wheel springs back to center.")]
@@ -239,7 +241,7 @@ public class SteeringWheel : MonoBehaviour
         }
 
         float axisX = invertSteering ? NormalizedValue : -NormalizedValue;
-        axisX = Mathf.Clamp(axisX * steerGain, -1f, 1f);
+        axisX = ApplyAxisResponse(axisX);
 
         // VR/MR: only one libretro game runs at a time. Always write the maps the cores poll
         // (deviceIdsJoypad.controlMap == LibretroMameCore.ControlMap). Do not gate on cabinet
@@ -444,6 +446,18 @@ public class SteeringWheel : MonoBehaviour
     }
 
     /// <summary>
+    /// YAML <c>steer-anti-deadzone</c>: 0–1. Remaps non-zero axis to start at this magnitude.
+    /// Ignored if null or &lt;= 0.
+    /// </summary>
+    public void SetSteerAntiDeadzoneFromYaml(float? antiDeadzone)
+    {
+        if (!antiDeadzone.HasValue || antiDeadzone.Value <= 0f)
+            return;
+
+        steerAntiDeadzone = Mathf.Clamp(antiDeadzone.Value, 0f, 0.95f);
+    }
+
+    /// <summary>
     /// YAML <c>steer-digital</c>: when true, wheel also asserts JOYPAD left/right.
     /// Set false for NeGcon / DualShock proportional steering.
     /// </summary>
@@ -453,6 +467,22 @@ public class SteeringWheel : MonoBehaviour
             return;
 
         steerDigital = digital.Value;
+    }
+
+    /// <summary>
+    /// Gain then optional anti-deadzone: jumps past the game's stick deadzone near center.
+    /// </summary>
+    float ApplyAxisResponse(float normalizedSigned)
+    {
+        float axis = Mathf.Clamp(normalizedSigned * steerGain, -1f, 1f);
+        float mag = Mathf.Abs(axis);
+        if (mag <= 0.0001f)
+            return 0f;
+
+        if (steerAntiDeadzone > 0.0001f)
+            mag = steerAntiDeadzone + (1f - steerAntiDeadzone) * mag;
+
+        return Mathf.Sign(axis) * Mathf.Clamp01(mag);
     }
 
     void ConfigureRigidbody()

@@ -450,6 +450,13 @@ public class CabinetInformation
         public float? steerGain;
 
         /// <summary>
+        /// Optional anti-deadzone 0–1 for steering-wheel (default 0). Remaps non-zero axis to start at this
+        /// magnitude so games with a large stick deadzone respond near center.
+        /// </summary>
+        [YamlMember(Alias = "steer-anti-deadzone", ApplyNamingConventions = false)]
+        public float? steerAntiDeadzone;
+
+        /// <summary>
         /// When true (default), steering-wheel also presses JOYPAD left/right.
         /// Set false for NeGcon / proportional analog racers.
         /// </summary>
