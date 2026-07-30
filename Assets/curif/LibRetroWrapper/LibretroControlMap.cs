@@ -91,10 +91,12 @@ public class LibretroControlMap : MonoBehaviour
 
         // Left grip = MODIFIER (mutes all game input in LibretroMameCore) and JOYPAD_L2;
         // right grip = JOYPAD_R2 / EXIT. Steering-wheel grab uses grips — suppress those
-        // bindings while holding so grab does not accelerate (L2/R2) or mute buttons.
+        // bindings while holding so grab does not accelerate, mute buttons, or exit cabinet.
         if (SteeringWheel.IsAnyHandHolding
             && (mameControl == "MODIFIER"
                 || mameControl == LibretroControlMapDictionnary.MODIFIER
+                || mameControl == "EXIT"
+                || mameControl == LibretroControlMapDictionnary.EXIT
                 || mameControl == "JOYPAD_L2"
                 || mameControl == LibretroControlMapDictionnary.JOYPAD_L2
                 || mameControl == "JOYPAD_R2"

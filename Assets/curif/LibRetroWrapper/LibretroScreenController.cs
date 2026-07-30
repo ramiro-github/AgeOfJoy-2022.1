@@ -712,10 +712,6 @@ public class LibretroScreenController : MonoBehaviour, ISuspendableCabinetScreen
 
     bool PlayerWantsToExit()
     {
-        // Holding the wheel uses grips — do not treat that as the exit chord.
-        if (SteeringWheel.IsAnyHandHolding)
-            return false;
-
         if (libretroControlMap.isActive(LC.MODIFIER) && libretroControlMap.isActive(LC.EXIT))
         {
             return true;

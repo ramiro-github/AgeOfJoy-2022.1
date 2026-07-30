@@ -45,6 +45,11 @@ public class SteeringWheel : MonoBehaviour
     [SerializeField] float gripReleaseThreshold = 0.35f;
     [SerializeField] bool hideHandsOnGrab = true;
     [SerializeField] bool logDebug;
+    [Header("Grab marker")]
+    [Tooltip("Small sphere snapped onto the wheel rim at grab; stays parented and rotates with the wheel.")]
+    [SerializeField] bool showGrabMarkers = true;
+    [SerializeField] float grabMarkerRadius = 0.01f;
+    [SerializeField] Color grabMarkerColor = new Color(1f, 0.85f, 0.15f, 0.95f);
 
     [Header("Game input")]
     [Tooltip("Maps wheel angle to thumbstick X (right stick / JOYPAD left-right). Invert if turn direction feels wrong.")]
@@ -86,6 +91,7 @@ public class SteeringWheel : MonoBehaviour
         public IXRHoverInteractor Interactor;
         public Transform Follow;
         public bool IsLeft;
+        public Transform Marker;
     }
 
     public float AngleDegrees => currentAngle;
@@ -219,6 +225,10 @@ public class SteeringWheel : MonoBehaviour
 
     void OnDestroy()
     {
+        for (int i = heldHands.Count - 1; i >= 0; i--)
+            DestroyGrabMarker(heldHands[i].Marker);
+        heldHands.Clear();
+
         ClearControlMapOverride();
         NotifyHoldSessionEnded();
 
@@ -600,13 +610,18 @@ public class SteeringWheel : MonoBehaviour
 
         bool wasEmpty = heldHands.Count == 0;
         bool isLeft = IsLeftInteractor(interactor);
+        Transform marker = showGrabMarkers ? CreateGrabMarker(isLeft) : null;
         heldHands.Add(new HeldHand
         {
             Interactor = interactor,
             Follow = follow,
             IsLeft = isLeft,
+            Marker = marker,
         });
         hasPreviousHandsAngle = false;
+
+        if (marker != null && follow != null)
+            PlaceGrabMarker(marker, follow.position);
 
         if (wasEmpty)
             NotifyHoldSessionStarted();
@@ -622,6 +637,8 @@ public class SteeringWheel : MonoBehaviour
         HeldHand held = heldHands[index];
         heldHands.RemoveAt(index);
         hasPreviousHandsAngle = false;
+
+        DestroyGrabMarker(held.Marker);
 
         if (held.IsLeft)
             RestoreHandVisuals(hiddenLeftRenderers);
@@ -639,6 +656,76 @@ public class SteeringWheel : MonoBehaviour
         }
 
         Log($"hold end left={held.IsLeft} count={heldHands.Count}");
+    }
+
+    Transform CreateGrabMarker(bool isLeft)
+    {
+        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = isLeft ? "SteeringGrabMarker_L" : "SteeringGrabMarker_R";
+        go.transform.SetParent(transform, false);
+        go.transform.localScale = Vector3.one * (grabMarkerRadius * 2f);
+
+        Collider col = go.GetComponent<Collider>();
+        if (col != null)
+            Destroy(col);
+
+        Renderer renderer = go.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            Shader shader = Shader.Find("Unlit/Color")
+                ?? Shader.Find("Universal Render Pipeline/Unlit")
+                ?? Shader.Find("Sprites/Default")
+                ?? Shader.Find("Standard");
+            if (shader != null)
+            {
+                Material mat = new Material(shader);
+                if (mat.HasProperty("_Color"))
+                    mat.color = grabMarkerColor;
+                else if (mat.HasProperty("_BaseColor"))
+                    mat.SetColor("_BaseColor", grabMarkerColor);
+                renderer.sharedMaterial = mat;
+            }
+        }
+
+        return go.transform;
+    }
+
+    /// <summary>
+    /// Snap marker onto the wheel rim at the hand's angular position and parent it so it
+    /// stays flush and rotates with the wheel (does not follow the hand afterward).
+    /// </summary>
+    void PlaceGrabMarker(Transform marker, Vector3 handWorld)
+    {
+        Vector3 pivot = PivotWorldPosition();
+        Vector3 axis = AxisWorld();
+        Vector3 flat = Vector3.ProjectOnPlane(handWorld - pivot, axis);
+        if (flat.sqrMagnitude < 0.0001f)
+            flat = Vector3.ProjectOnPlane(RestWorldRotation() * GetPerpendicular(localRotationAxis), axis);
+
+        if (flat.sqrMagnitude < 0.0001f)
+        {
+            marker.position = handWorld;
+            return;
+        }
+
+        // Always on the outer rim so the sphere sits against the wheel, not in mid-air toward the hub.
+        float rimRadius = interactionCollider != null
+            ? Mathf.Max(0.05f, interactionCollider.radius * 0.92f
+                * Mathf.Max(transform.lossyScale.x, Mathf.Max(transform.lossyScale.y, transform.lossyScale.z)))
+            : 0.15f;
+
+        marker.position = pivot + flat.normalized * rimRadius;
+    }
+
+    static void DestroyGrabMarker(Transform marker)
+    {
+        if (marker == null)
+            return;
+
+        if (Application.isPlaying)
+            Destroy(marker.gameObject);
+        else
+            DestroyImmediate(marker.gameObject);
     }
 
     bool IsHolding(IXRHoverInteractor interactor)
