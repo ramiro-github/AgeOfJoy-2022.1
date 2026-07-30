@@ -252,45 +252,55 @@ public class LibretroControlMap : MonoBehaviour
     // Raw value of an axis/trigger action, without the digital thresholding Active() applies.
     // Vector2 for a thumbstick binding (InvertX/Y honored); a trigger/button binding reports its
     // 0..1 actuation mirrored into both components. Vector2.zero if the action is missing/disabled.
+    // Steering-wheel X is applied even when the stick action is missing/disabled/null — same
+    // contract as LibretroMameCore.inputStateCB_Analog (required by Flycast ReadStick).
     public Vector2 ReadAxisRaw(string mameControl, int port = 0)
     {
-        if (actionMap == null || !actionMap.enabled)
-            return Vector2.zero;
+        Vector2 v = Vector2.zero;
 
-        InputAction action = actionMap.FindAction(mameControl + "_" + port.ToString());
-        if (action == null)
-            return Vector2.zero;
-
-        if (!action.enabled)
+        if (actionMap != null && actionMap.enabled)
         {
-            try { action.Enable(); }
-            catch { return Vector2.zero; }
-        }
-
-        var result = action.ReadValueAsObject();
-        if (result is Vector2 v)
-        {
-            if (InvertX) v.x = -v.x;
-            if (InvertY) v.y = -v.y;
-            // Flycast ReadStick + swanstation analog fallback: wheel overrides stick X only.
-            if (externalSteerActive
-                && (mameControl == LibretroControlMapDictionnary.JOYPAD_UP
-                    || mameControl == LibretroControlMapDictionnary.JOYPAD_DOWN
-                    || mameControl == LibretroControlMapDictionnary.JOYPAD_LEFT
-                    || mameControl == LibretroControlMapDictionnary.JOYPAD_RIGHT))
+            InputAction action = actionMap.FindAction(mameControl + "_" + port.ToString());
+            if (action != null)
             {
-                v.x = Mathf.Clamp(externalSteerX, -1f, 1f);
-            }
-            return v;
-        }
-        if (result is float f)
-            return new Vector2(f, f); // trigger/button actuation (invert is meaningless here)
+                if (!action.enabled)
+                {
+                    try { action.Enable(); }
+                    catch { action = null; }
+                }
 
-        return Vector2.zero;
+                if (action != null)
+                {
+                    var result = action.ReadValueAsObject();
+                    if (result is Vector2 stick)
+                    {
+                        v = stick;
+                        if (InvertX) v.x = -v.x;
+                        if (InvertY) v.y = -v.y;
+                    }
+                    else if (result is float f)
+                    {
+                        // trigger/button actuation (invert is meaningless here)
+                        v = new Vector2(f, f);
+                    }
+                }
+            }
+        }
+
+        if (externalSteerActive
+            && (mameControl == LibretroControlMapDictionnary.JOYPAD_UP
+                || mameControl == LibretroControlMapDictionnary.JOYPAD_DOWN
+                || mameControl == LibretroControlMapDictionnary.JOYPAD_LEFT
+                || mameControl == LibretroControlMapDictionnary.JOYPAD_RIGHT))
+        {
+            v.x = Mathf.Clamp(externalSteerX, -1f, 1f);
+        }
+
+        return v;
     }
 
     // Left thumbstick as libretro analog-stick values [-0x7fff, 0x7fff]. Y is negated: Unity stick-up
-    // is +y, libretro/Dreamcast analog-up is -y.
+    // is +y, libretro/Dreamcast analog-up is -y. Wheel override lives in ReadAxisRaw (X only).
     public void ReadStick(out short x, out short y, int port = 0)
     {
         Vector2 v = ReadAxisRaw(LibretroControlMapDictionnary.JOYPAD_UP, port);
