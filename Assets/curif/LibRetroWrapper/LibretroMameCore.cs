@@ -1757,6 +1757,48 @@ public static unsafe class LibretroMameCore
         return deviceId;
     }
 
+    /// <summary>Current libretro device type name for a port (e.g. psx_analog), or empty.</summary>
+    public static string GetInputDeviceTypeName(uint port = 0)
+    {
+        if (libretroInputDevices == null)
+            return string.Empty;
+
+        if (!libretroInputDevices.TryGetValue(port, out LibretroInputDevice device) || device == null)
+            return string.Empty;
+
+        return device.Name ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Change port device type at runtime (and in the live dictionary). Applies immediately when a game is loaded.
+    /// </summary>
+    public static bool SetInputDeviceType(string deviceTypeName, uint port = 0)
+    {
+        if (string.IsNullOrWhiteSpace(deviceTypeName))
+            return false;
+
+        LibretroInputDevice device = LibretroInputDevice.GetInputDeviceType(deviceTypeName.Trim());
+        if (device == null || device.Name == LibretroInputDevice.Empty.Name)
+        {
+            ConfigManager.WriteConsoleWarning($"[LibRetroMameCore.SetInputDeviceType] unknown type '{deviceTypeName}'");
+            return false;
+        }
+
+        if (libretroInputDevices == null)
+            libretroInputDevices = new Dictionary<uint, LibretroInputDevice>();
+
+        libretroInputDevices[port] = device;
+
+        if (GameLoaded)
+        {
+            uint deviceId = RemapControllerDeviceIdForCore(device.Id);
+            WriteConsole($"[LibRetroMameCore.SetInputDeviceType] port {port} -> {device.Name}:{deviceId}");
+            wrapper_set_controller_port_device(port, deviceId);
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Proportional sticks / NeGcon axes [-0x7fff, 0x7fff].
     /// Stick polls use INDEX_LEFT/RIGHT + ANALOG_X/Y.

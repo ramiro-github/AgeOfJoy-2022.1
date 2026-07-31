@@ -66,6 +66,8 @@ public class SteeringWheel : MonoBehaviour
     [SerializeField] bool steerDigital = true;
     [Tooltip("Keep feeding axis while the wheel springs back to center.")]
     [SerializeField] bool driveAxisWhileReturning = true;
+    [Tooltip("Menu button opens the steering sensitivity HUD (YAML steer-settings-menu; default off).")]
+    [SerializeField] bool steerSettingsMenuEnabled = false;
 
     [Header("Haptics")]
     [SerializeField] bool enableHaptics = true;
@@ -130,6 +132,51 @@ public class SteeringWheel : MonoBehaviour
 
     public bool InteractionEnabled => interactionEnabled;
 
+    public float MaxAngleDegrees => maxAngleDegrees;
+    public float SteerGain => steerGain;
+    public float SteerAntiDeadzone => steerAntiDeadzone;
+    public bool SteerDigital => steerDigital;
+
+    /// <summary>YAML-style label: x / y / z.</summary>
+    public string RotationAxisLabel => AxisToLabel(localRotationAxis);
+
+    /// <summary>Libretro devices.type for slot 0 (e.g. psx_analog).</summary>
+    public string InputDeviceType => string.IsNullOrEmpty(inputDeviceType) ? "gamepad" : inputDeviceType;
+
+    /// <summary>Stable id for PlayerPrefs (cabinet db name when available).</summary>
+    public string CabinetKey
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(cabinetKeyCached))
+                return cabinetKeyCached;
+
+            cabinetKeyCached = ResolveCabinetKey();
+            return cabinetKeyCached;
+        }
+    }
+
+    string cabinetKeyCached;
+    bool baselineCaptured;
+    float baselineMaxAngle = 90f;
+    float baselineSteerGain = 1f;
+    float baselineSteerAntiDeadzone;
+    bool baselineSteerDigital = true;
+    Vector3 baselineRotationAxis = Vector3.forward;
+    string inputDeviceType = "gamepad";
+    string baselineInputDeviceType = "gamepad";
+    bool inputDeviceAppliedToCore;
+
+    static readonly string[] SteerDeviceCycle =
+    {
+        "psx_analog",
+        "psx_dual_shock",
+        "psx_negcon",
+        "psx_standard",
+    };
+
+    const string PrefsPrefix = "SteeringWheel.Tune.";
+
     /// <summary>
     /// Enable/disable grab + axis output. Components stay attached; idle cabinets keep the wheel decorative.
     /// Driven from this cabinet's control-map enable (play session) — no hooks in curif controllers.
@@ -145,7 +192,19 @@ public class SteeringWheel : MonoBehaviour
         interactionEnabled = enabled;
 
         if (!enabled)
+        {
+            if (SteeringWheelSettingsHUD.IsOpen
+                && SteeringWheelSettingsHUD.Instance != null
+                && SteeringWheelSettingsHUD.Instance.Target == this)
+                SteeringWheelSettingsHUD.Instance.Hide();
+
             ForceReleaseAndReset();
+            inputDeviceAppliedToCore = false;
+        }
+        else
+        {
+            ApplyInputDeviceToCore();
+        }
 
         ApplyInteractionHardware(enabled);
 
@@ -251,11 +310,18 @@ public class SteeringWheel : MonoBehaviour
         CaptureHomePose();
         ApplyPose(displayedAngle);
         localControlMap = FindLocalControlMap();
+        if (!baselineCaptured)
+            CommitBaselineAndLoadOverrides();
         SyncInteractionToPlaySession();
     }
 
     void OnDestroy()
     {
+        if (SteeringWheelSettingsHUD.IsOpen
+            && SteeringWheelSettingsHUD.Instance != null
+            && SteeringWheelSettingsHUD.Instance.Target == this)
+            SteeringWheelSettingsHUD.Instance.Hide();
+
         for (int i = heldHands.Count - 1; i >= 0; i--)
             DestroyGrabMarker(heldHands[i].Marker);
         heldHands.Clear();
@@ -385,7 +451,40 @@ public class SteeringWheel : MonoBehaviour
         if (!interactionEnabled)
             return;
 
+        if (steerSettingsMenuEnabled
+            && SteeringWheelSettingsHUD.WasMenuButtonPressed()
+            && IsPreferredSettingsTarget())
+            SteeringWheelSettingsHUD.Ensure().Toggle(this);
+
         UpdateGripHolds();
+    }
+
+    bool IsPreferredSettingsTarget()
+    {
+        if (SteeringWheelSettingsHUD.IsOpen
+            && SteeringWheelSettingsHUD.Instance != null
+            && SteeringWheelSettingsHUD.Instance.Target == this)
+            return true;
+
+        if (IsGrabbed)
+            return true;
+
+        SteeringWheel[] wheels = FindObjectsOfType<SteeringWheel>();
+        SteeringWheel fallback = null;
+        for (int i = 0; i < wheels.Length; i++)
+        {
+            SteeringWheel wheel = wheels[i];
+            if (wheel == null || !wheel.interactionEnabled)
+                continue;
+
+            if (wheel.IsGrabbed)
+                return wheel == this;
+
+            if (fallback == null)
+                fallback = wheel;
+        }
+
+        return fallback == this;
     }
 
     void LateUpdate()
@@ -444,25 +543,16 @@ public class SteeringWheel : MonoBehaviour
         if (string.IsNullOrWhiteSpace(axisName))
             return;
 
-        switch (axisName.Trim().ToLowerInvariant())
+        if (!TryParseAxisLabel(axisName, out Vector3 axis))
         {
-            case "x":
-            case "right":
-                localRotationAxis = Vector3.right;
-                break;
-            case "y":
-            case "up":
-                localRotationAxis = Vector3.up;
-                break;
-            case "z":
-            case "forward":
-                localRotationAxis = Vector3.forward;
-                break;
-            default:
-                ConfigManager.WriteConsoleWarning(
-                    $"{LogPrefix} unknown rotation-axis '{axisName}' (use x/y/z or right/up/forward)");
-                break;
+            ConfigManager.WriteConsoleWarning(
+                $"{LogPrefix} unknown rotation-axis '{axisName}' (use x/y/z or right/up/forward)");
+            return;
         }
+
+        localRotationAxis = axis;
+        visualRimRadiusWorld = -1f;
+        hasPreviousHandsAngle = false;
     }
 
     /// <summary>
@@ -511,6 +601,290 @@ public class SteeringWheel : MonoBehaviour
             return;
 
         steerDigital = digital.Value;
+    }
+
+    /// <summary>
+    /// YAML <c>steer-settings-menu</c>: when true, Menu button opens the sensitivity HUD (default off).
+    /// </summary>
+    public void SetSteerSettingsMenuFromYaml(bool? enabled)
+    {
+        if (!enabled.HasValue)
+            return;
+
+        steerSettingsMenuEnabled = enabled.Value;
+        if (!steerSettingsMenuEnabled
+            && SteeringWheelSettingsHUD.IsOpen
+            && SteeringWheelSettingsHUD.Instance != null
+            && SteeringWheelSettingsHUD.Instance.Target == this)
+            SteeringWheelSettingsHUD.Instance.Hide();
+    }
+
+    /// <summary>
+    /// YAML <c>devices[slot=0].type</c> baseline (e.g. psx_analog). Empty keeps gamepad.
+    /// </summary>
+    public void SetInputDeviceTypeFromYaml(string deviceType)
+    {
+        if (string.IsNullOrWhiteSpace(deviceType))
+            return;
+
+        inputDeviceType = deviceType.Trim();
+    }
+
+    /// <summary>
+    /// Snapshot current values as YAML baseline, then apply any PlayerPrefs overrides.
+    /// Call after description.yaml fields are applied.
+    /// </summary>
+    public void CommitBaselineAndLoadOverrides()
+    {
+        baselineMaxAngle = maxAngleDegrees;
+        baselineSteerGain = steerGain;
+        baselineSteerAntiDeadzone = steerAntiDeadzone;
+        baselineSteerDigital = steerDigital;
+        baselineRotationAxis = localRotationAxis;
+        baselineInputDeviceType = string.IsNullOrEmpty(inputDeviceType) ? "gamepad" : inputDeviceType;
+        baselineCaptured = true;
+        LoadPersistedOverrides();
+    }
+
+    public void AdjustMaxAngleDegrees(float delta)
+    {
+        maxAngleDegrees = Mathf.Clamp(Mathf.Round((maxAngleDegrees + delta) / 5f) * 5f, 30f, 360f);
+        currentAngle = Mathf.Clamp(currentAngle, -maxAngleDegrees, maxAngleDegrees);
+        displayedAngle = Mathf.Clamp(displayedAngle, -maxAngleDegrees, maxAngleDegrees);
+        PersistOverrides();
+    }
+
+    public void AdjustSteerGain(float delta)
+    {
+        steerGain = Mathf.Clamp(Mathf.Round((steerGain + delta) * 10f) / 10f, 0.1f, 5f);
+        PersistOverrides();
+    }
+
+    public void AdjustSteerAntiDeadzone(float delta)
+    {
+        steerAntiDeadzone = Mathf.Clamp(Mathf.Round((steerAntiDeadzone + delta) * 20f) / 20f, 0f, 0.95f);
+        PersistOverrides();
+    }
+
+    public void ToggleSteerDigital()
+    {
+        steerDigital = !steerDigital;
+        PersistOverrides();
+    }
+
+    /// <summary>Cycle rotation-axis x → y → z (or reverse).</summary>
+    public void CycleRotationAxis(int direction)
+    {
+        int index = AxisToIndex(localRotationAxis);
+        index = (index + (direction >= 0 ? 1 : -1) + 3) % 3;
+        localRotationAxis = IndexToAxis(index);
+        visualRimRadiusWorld = -1f;
+        hasPreviousHandsAngle = false;
+        currentAngle = 0f;
+        displayedAngle = 0f;
+        ApplyPose(0f);
+        PersistOverrides();
+    }
+
+    /// <summary>Cycle devices.type for slot 0 (psx_analog / dual_shock / negcon / standard).</summary>
+    public void CycleInputDeviceType(int direction)
+    {
+        int index = IndexOfDeviceType(inputDeviceType);
+        if (index < 0)
+            index = 0;
+
+        index = (index + (direction >= 0 ? 1 : -1) + SteerDeviceCycle.Length) % SteerDeviceCycle.Length;
+        inputDeviceType = SteerDeviceCycle[index];
+        PersistOverrides();
+        ApplyInputDeviceToCore(force: true);
+    }
+
+    public void ResetToYamlBaseline()
+    {
+        maxAngleDegrees = baselineMaxAngle;
+        steerGain = baselineSteerGain;
+        steerAntiDeadzone = baselineSteerAntiDeadzone;
+        steerDigital = baselineSteerDigital;
+        localRotationAxis = baselineRotationAxis;
+        inputDeviceType = baselineInputDeviceType;
+        visualRimRadiusWorld = -1f;
+        hasPreviousHandsAngle = false;
+        currentAngle = Mathf.Clamp(currentAngle, -maxAngleDegrees, maxAngleDegrees);
+        displayedAngle = Mathf.Clamp(displayedAngle, -maxAngleDegrees, maxAngleDegrees);
+        ApplyPose(displayedAngle);
+        ClearPersistedOverrides();
+        ApplyInputDeviceToCore(force: true);
+    }
+
+    void LoadPersistedOverrides()
+    {
+        string key = CabinetKey;
+        if (string.IsNullOrEmpty(key))
+            return;
+
+        string prefix = PrefsPrefix + key + ".";
+        if (PlayerPrefs.HasKey(prefix + "maxAngle"))
+            maxAngleDegrees = Mathf.Clamp(PlayerPrefs.GetFloat(prefix + "maxAngle", maxAngleDegrees), 30f, 360f);
+        if (PlayerPrefs.HasKey(prefix + "gain"))
+            steerGain = Mathf.Clamp(PlayerPrefs.GetFloat(prefix + "gain", steerGain), 0.1f, 5f);
+        if (PlayerPrefs.HasKey(prefix + "antiDz"))
+            steerAntiDeadzone = Mathf.Clamp(PlayerPrefs.GetFloat(prefix + "antiDz", steerAntiDeadzone), 0f, 0.95f);
+        if (PlayerPrefs.HasKey(prefix + "digital"))
+            steerDigital = PlayerPrefs.GetInt(prefix + "digital", steerDigital ? 1 : 0) != 0;
+        if (PlayerPrefs.HasKey(prefix + "axis"))
+        {
+            string axis = PlayerPrefs.GetString(prefix + "axis", AxisToLabel(localRotationAxis));
+            if (TryParseAxisLabel(axis, out Vector3 parsed))
+            {
+                localRotationAxis = parsed;
+                visualRimRadiusWorld = -1f;
+                hasPreviousHandsAngle = false;
+            }
+        }
+        if (PlayerPrefs.HasKey(prefix + "device"))
+            inputDeviceType = PlayerPrefs.GetString(prefix + "device", inputDeviceType);
+
+        currentAngle = Mathf.Clamp(currentAngle, -maxAngleDegrees, maxAngleDegrees);
+        displayedAngle = Mathf.Clamp(displayedAngle, -maxAngleDegrees, maxAngleDegrees);
+    }
+
+    void PersistOverrides()
+    {
+        string key = CabinetKey;
+        if (string.IsNullOrEmpty(key))
+            return;
+
+        string prefix = PrefsPrefix + key + ".";
+        PlayerPrefs.SetFloat(prefix + "maxAngle", maxAngleDegrees);
+        PlayerPrefs.SetFloat(prefix + "gain", steerGain);
+        PlayerPrefs.SetFloat(prefix + "antiDz", steerAntiDeadzone);
+        PlayerPrefs.SetInt(prefix + "digital", steerDigital ? 1 : 0);
+        PlayerPrefs.SetString(prefix + "axis", AxisToLabel(localRotationAxis));
+        PlayerPrefs.SetString(prefix + "device", InputDeviceType);
+        PlayerPrefs.Save();
+    }
+
+    void ClearPersistedOverrides()
+    {
+        string key = CabinetKey;
+        if (string.IsNullOrEmpty(key))
+            return;
+
+        string prefix = PrefsPrefix + key + ".";
+        PlayerPrefs.DeleteKey(prefix + "maxAngle");
+        PlayerPrefs.DeleteKey(prefix + "gain");
+        PlayerPrefs.DeleteKey(prefix + "antiDz");
+        PlayerPrefs.DeleteKey(prefix + "digital");
+        PlayerPrefs.DeleteKey(prefix + "axis");
+        PlayerPrefs.DeleteKey(prefix + "device");
+        PlayerPrefs.Save();
+    }
+
+    void ApplyInputDeviceToCore(bool force = false)
+    {
+        if (!force && inputDeviceAppliedToCore)
+            return;
+
+        if (string.IsNullOrEmpty(inputDeviceType))
+            return;
+
+        if (LibretroMameCore.SetInputDeviceType(inputDeviceType, port: 0))
+            inputDeviceAppliedToCore = true;
+    }
+
+    static int IndexOfDeviceType(string type)
+    {
+        if (string.IsNullOrEmpty(type))
+            return -1;
+
+        for (int i = 0; i < SteerDeviceCycle.Length; i++)
+        {
+            if (string.Equals(SteerDeviceCycle[i], type, System.StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return -1;
+    }
+
+    static string AxisToLabel(Vector3 axis)
+    {
+        Vector3 n = axis.sqrMagnitude > 0.0001f ? axis.normalized : Vector3.forward;
+        float ax = Mathf.Abs(n.x);
+        float ay = Mathf.Abs(n.y);
+        float az = Mathf.Abs(n.z);
+        if (ax >= ay && ax >= az)
+            return "x";
+        if (ay >= ax && ay >= az)
+            return "y";
+        return "z";
+    }
+
+    static int AxisToIndex(Vector3 axis)
+    {
+        switch (AxisToLabel(axis))
+        {
+            case "x": return 0;
+            case "y": return 1;
+            default: return 2;
+        }
+    }
+
+    static Vector3 IndexToAxis(int index)
+    {
+        switch (index)
+        {
+            case 0: return Vector3.right;
+            case 1: return Vector3.up;
+            default: return Vector3.forward;
+        }
+    }
+
+    static bool TryParseAxisLabel(string axisName, out Vector3 axis)
+    {
+        axis = Vector3.forward;
+        if (string.IsNullOrWhiteSpace(axisName))
+            return false;
+
+        switch (axisName.Trim().ToLowerInvariant())
+        {
+            case "x":
+            case "right":
+                axis = Vector3.right;
+                return true;
+            case "y":
+            case "up":
+                axis = Vector3.up;
+                return true;
+            case "z":
+            case "forward":
+                axis = Vector3.forward;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    string ResolveCabinetKey()
+    {
+        MRPlacedCabinet placed = GetComponentInParent<MRPlacedCabinet>();
+        if (placed != null && !string.IsNullOrEmpty(placed.CabinetDBName))
+            return placed.CabinetDBName;
+
+        CabinetReplace replace = GetComponentInParent<CabinetReplace>();
+        if (replace != null && !string.IsNullOrEmpty(replace.name))
+            return replace.name;
+
+        Transform node = transform;
+        while (node != null)
+        {
+            if (node.name.StartsWith("Cabinet", System.StringComparison.OrdinalIgnoreCase)
+                || node.GetComponent<LibretroScreenController>() != null)
+                return node.name;
+
+            node = node.parent;
+        }
+
+        return gameObject.name;
     }
 
     /// <summary>

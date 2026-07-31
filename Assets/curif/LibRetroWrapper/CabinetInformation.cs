@@ -463,6 +463,13 @@ public class CabinetInformation
         [YamlMember(Alias = "steer-digital", ApplyNamingConventions = false)]
         public bool? steerDigital;
 
+        /// <summary>
+        /// When true, Menu button opens the in-headset steering sensitivity HUD.
+        /// Default false — cabinets must opt in with <c>steer-settings-menu: true</c>.
+        /// </summary>
+        [YamlMember(Alias = "steer-settings-menu", ApplyNamingConventions = false)]
+        public bool? steerSettingsMenu;
+
         [YamlMember(Alias = "material-properties", ApplyNamingConventions = false)]
         public Dictionary<string, string> properties = new Dictionary<string, string>();
 

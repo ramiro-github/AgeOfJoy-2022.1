@@ -10,7 +10,8 @@ using UnityEngine;
 /// the cabinet mesh itself is the wheel. Legacy alias <c>steeringwheel</c> is still accepted.
 /// Optional part fields: <c>rotation-axis</c> (x/y/z), <c>max-angle</c> (degrees each way),
 /// <c>steer-gain</c> (axis multiplier, default 1), <c>steer-anti-deadzone</c> (0–1, default 0),
-/// <c>steer-digital</c> (JOYPAD L/R, default true).
+/// <c>steer-digital</c> (JOYPAD L/R, default true),
+/// <c>steer-settings-menu</c> (Menu HUD for sensitivity, default false — opt-in).
 /// </summary>
 public static class CabinetSteeringWheelSpawner
 {
@@ -52,7 +53,10 @@ public static class CabinetSteeringWheelSpawner
         steering.SetSteerGainFromYaml(wheelPart.steerGain);
         steering.SetSteerAntiDeadzoneFromYaml(wheelPart.steerAntiDeadzone);
         steering.SetSteerDigitalFromYaml(wheelPart.steerDigital);
+        steering.SetSteerSettingsMenuFromYaml(wheelPart.steerSettingsMenu);
+        steering.SetInputDeviceTypeFromYaml(ResolveSlot0DeviceType(cabInfo));
         steering.CaptureHomePose();
+        steering.CommitBaselineAndLoadOverrides();
         // Decorative until this cabinet's LibretroControlMap is enabled (play session).
         steering.SetInteractionEnabled(false);
 
@@ -62,7 +66,24 @@ public static class CabinetSteeringWheelSpawner
             $"steerGain={wheelPart.steerGain?.ToString() ?? "default"} " +
             $"steerAntiDz={wheelPart.steerAntiDeadzone?.ToString() ?? "default"} " +
             $"steerDigital={wheelPart.steerDigital?.ToString() ?? "default"} " +
+            $"steerSettingsMenu={wheelPart.steerSettingsMenu?.ToString() ?? "default"} " +
+            $"device={ResolveSlot0DeviceType(cabInfo) ?? "default"} " +
             $"pos={wheel.position} rot={wheel.eulerAngles}");
+    }
+
+    static string ResolveSlot0DeviceType(CabinetInformation cabInfo)
+    {
+        if (cabInfo?.devices == null)
+            return null;
+
+        for (int i = 0; i < cabInfo.devices.Count; i++)
+        {
+            CabinetInformation.CabinetInputDevice device = cabInfo.devices[i];
+            if (device != null && device.slot == 0 && !string.IsNullOrWhiteSpace(device.type))
+                return device.type.Trim();
+        }
+
+        return null;
     }
 
     static bool IsWheelPartName(string name)
