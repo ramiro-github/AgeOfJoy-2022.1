@@ -12,6 +12,7 @@ using UnityEngine.XR.Interaction.Toolkit;
 /// (not index trigger — free for game inputs like GT rear-view).
 /// Press grip once while hovering to hold; press again to release (toggle, no need to keep squeezing).
 /// Position stays fixed; only rotates around a local axis. Uses hover + grip so XR never reparents the wheel.
+/// Haptics (default on): grab/release pulse, center notch, near-lock cue, hard-lock stop.
 /// Wired onto the existing GLB <c>steering-wheel</c> mesh by <see cref="CabinetSteeringWheelSpawner"/>.
 /// </summary>
 [DisallowMultipleComponent]
@@ -66,6 +67,13 @@ public class SteeringWheel : MonoBehaviour
     [Tooltip("Keep feeding axis while the wheel springs back to center.")]
     [SerializeField] bool driveAxisWhileReturning = true;
 
+    [Header("Haptics")]
+    [SerializeField] bool enableHaptics = true;
+    [Tooltip("Minimum seconds between discrete haptic events (center / near-lock).")]
+    [SerializeField] float hapticEventCooldown = 0.1f;
+    [Tooltip("Fraction of max-angle where the soft near-lock cue fires.")]
+    [SerializeField] [Range(0.5f, 0.98f)] float nearLockRatio = 0.88f;
+
     /// <summary>When false, XR grab and game axis are off (cabinet idle until play session).</summary>
     bool interactionEnabled = true;
 
@@ -95,6 +103,15 @@ public class SteeringWheel : MonoBehaviour
     // Edge latch for grip toggle (per hand) — press once = hold, press again = release.
     bool leftGripWasDown;
     bool rightGripWasDown;
+
+    // Discrete steering haptics (grab / center / near-lock / hard lock).
+    float hapticCooldownUntil;
+    bool nearLockLatchedPositive;
+    bool nearLockLatchedNegative;
+    bool hardLockLatchedPositive;
+    bool hardLockLatchedNegative;
+    float leftHapticUntil;
+    float rightHapticUntil;
 
     struct HeldHand
     {
@@ -154,6 +171,8 @@ public class SteeringWheel : MonoBehaviour
         hasPreviousHandsAngle = false;
         leftGripWasDown = false;
         rightGripWasDown = false;
+        ResetHapticState();
+        StopAllHaptics();
         ClearControlMapOverride();
         currentAngle = 0f;
         displayedAngle = 0f;
@@ -243,6 +262,7 @@ public class SteeringWheel : MonoBehaviour
 
         ClearControlMapOverride();
         NotifyHoldSessionEnded();
+        StopAllHaptics();
 
         if (hoverInteractable == null)
             return;
@@ -354,11 +374,13 @@ public class SteeringWheel : MonoBehaviour
     void OnDisable()
     {
         ClearControlMapOverride();
+        StopAllHaptics();
     }
 
     void Update()
     {
         SyncInteractionToPlaySession();
+        UpdateHapticDecay();
 
         if (!interactionEnabled)
             return;
@@ -718,6 +740,7 @@ public class SteeringWheel : MonoBehaviour
         if (hideHandsOnGrab)
             StartCoroutine(HideHandVisualsNextFrame(interactor, isLeft));
 
+        PulseHaptic(isLeft, frequency: 0.35f, amplitude: 0.45f, duration: 0.05f);
         Log($"hold start left={isLeft} count={heldHands.Count}");
     }
 
@@ -734,6 +757,8 @@ public class SteeringWheel : MonoBehaviour
         else
             RestoreHandVisuals(hiddenRightRenderers);
 
+        PulseHaptic(held.IsLeft, frequency: 0.3f, amplitude: 0.28f, duration: 0.04f);
+
         if (!IsGrabbed)
         {
             // Start return from the true continuous angle (avoid leftover smoothed/wrapped display).
@@ -742,6 +767,7 @@ public class SteeringWheel : MonoBehaviour
             // and exits cabinet play (breaks Quest buttons + can clear ControlMap).
             RestoreAllHandVisuals();
             NotifyHoldSessionEnded();
+            ResetHapticState();
         }
 
         Log($"hold end left={held.IsLeft} count={heldHands.Count}");
@@ -938,7 +964,9 @@ public class SteeringWheel : MonoBehaviour
 
         float frameDelta = Mathf.DeltaAngle(previousHandsAngle, handsAngle);
         previousHandsAngle = handsAngle;
+        float previousAngle = currentAngle;
         currentAngle = Mathf.Clamp(currentAngle + frameDelta, -maxAngleDegrees, maxAngleDegrees);
+        UpdateSteeringHaptics(previousAngle, currentAngle);
     }
 
     void ReturnTowardCenter()
@@ -1195,5 +1223,173 @@ public class SteeringWheel : MonoBehaviour
     {
         if (logDebug)
             ConfigManager.WriteConsole($"{LogPrefix} {message}");
+    }
+
+    void ResetHapticState()
+    {
+        nearLockLatchedPositive = false;
+        nearLockLatchedNegative = false;
+        hardLockLatchedPositive = false;
+        hardLockLatchedNegative = false;
+        hapticCooldownUntil = 0f;
+    }
+
+    void UpdateSteeringHaptics(float previousAngle, float nextAngle)
+    {
+        if (!enableHaptics || !IsGrabbed)
+            return;
+
+        // Center notch: crossed 0° while turning.
+        if ((previousAngle < 0f && nextAngle >= 0f) || (previousAngle > 0f && nextAngle <= 0f))
+        {
+            if (TryConsumeHapticCooldown())
+                PulseHapticAllHeld(frequency: 0.45f, amplitude: 0.32f, duration: 0.03f);
+        }
+
+        float near = Mathf.Max(1f, maxAngleDegrees * nearLockRatio);
+        float releaseNear = near * 0.82f;
+
+        if (nextAngle >= near && previousAngle < near && !nearLockLatchedPositive)
+        {
+            nearLockLatchedPositive = true;
+            if (TryConsumeHapticCooldown())
+                PulseHapticAllHeld(frequency: 0.4f, amplitude: 0.3f, duration: 0.04f);
+        }
+        else if (nextAngle < releaseNear)
+        {
+            nearLockLatchedPositive = false;
+            hardLockLatchedPositive = false;
+        }
+
+        if (nextAngle <= -near && previousAngle > -near && !nearLockLatchedNegative)
+        {
+            nearLockLatchedNegative = true;
+            if (TryConsumeHapticCooldown())
+                PulseHapticAllHeld(frequency: 0.4f, amplitude: 0.3f, duration: 0.04f);
+        }
+        else if (nextAngle > -releaseNear)
+        {
+            nearLockLatchedNegative = false;
+            hardLockLatchedNegative = false;
+        }
+
+        // Hard stop at max lock.
+        float lockEps = 0.05f;
+        if (nextAngle >= maxAngleDegrees - lockEps && previousAngle < maxAngleDegrees - lockEps
+            && !hardLockLatchedPositive)
+        {
+            hardLockLatchedPositive = true;
+            PulseHapticAllHeld(frequency: 0.55f, amplitude: 0.55f, duration: 0.06f);
+        }
+
+        if (nextAngle <= -maxAngleDegrees + lockEps && previousAngle > -maxAngleDegrees + lockEps
+            && !hardLockLatchedNegative)
+        {
+            hardLockLatchedNegative = true;
+            PulseHapticAllHeld(frequency: 0.55f, amplitude: 0.55f, duration: 0.06f);
+        }
+    }
+
+    bool TryConsumeHapticCooldown()
+    {
+        float now = Time.unscaledTime;
+        if (now < hapticCooldownUntil)
+            return false;
+
+        hapticCooldownUntil = now + Mathf.Max(0.02f, hapticEventCooldown);
+        return true;
+    }
+
+    void PulseHapticAllHeld(float frequency, float amplitude, float duration)
+    {
+        bool pulsedLeft = false;
+        bool pulsedRight = false;
+        for (int i = 0; i < heldHands.Count; i++)
+        {
+            if (heldHands[i].IsLeft)
+            {
+                if (pulsedLeft)
+                    continue;
+                pulsedLeft = true;
+            }
+            else
+            {
+                if (pulsedRight)
+                    continue;
+                pulsedRight = true;
+            }
+
+            PulseHaptic(heldHands[i].IsLeft, frequency, amplitude, duration);
+        }
+    }
+
+    void PulseHaptic(bool isLeft, float frequency, float amplitude, float duration)
+    {
+        if (!enableHaptics)
+            return;
+
+#if UNITY_EDITOR
+        return;
+#else
+        try
+        {
+            OVRInput.Controller controller = isLeft
+                ? OVRInput.Controller.LTouch
+                : OVRInput.Controller.RTouch;
+            OVRInput.SetControllerVibration(frequency, amplitude, controller);
+            float until = Time.unscaledTime + Mathf.Max(0.02f, duration);
+            if (isLeft)
+                leftHapticUntil = Mathf.Max(leftHapticUntil, until);
+            else
+                rightHapticUntil = Mathf.Max(rightHapticUntil, until);
+        }
+        catch
+        {
+            // optional feedback
+        }
+#endif
+    }
+
+    void UpdateHapticDecay()
+    {
+#if !UNITY_EDITOR
+        float now = Time.unscaledTime;
+        try
+        {
+            if (leftHapticUntil > 0f && now >= leftHapticUntil)
+            {
+                OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
+                leftHapticUntil = 0f;
+            }
+
+            if (rightHapticUntil > 0f && now >= rightHapticUntil)
+            {
+                OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
+                rightHapticUntil = 0f;
+            }
+        }
+        catch
+        {
+            leftHapticUntil = 0f;
+            rightHapticUntil = 0f;
+        }
+#endif
+    }
+
+    void StopAllHaptics()
+    {
+        leftHapticUntil = 0f;
+        rightHapticUntil = 0f;
+#if !UNITY_EDITOR
+        try
+        {
+            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
+            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
+        }
+        catch
+        {
+            // optional feedback
+        }
+#endif
     }
 }
