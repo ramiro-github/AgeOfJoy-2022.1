@@ -8,8 +8,9 @@ using UnityEngine.XR;
 using UnityEngine.XR.Interaction.Toolkit;
 
 /// <summary>
-/// VR steering wheel on a cabinet part: hold with one or two hands via the <b>grip</b> buttons
+/// VR steering wheel on a cabinet part: latch with one or two hands via the <b>grip</b> buttons
 /// (not index trigger — free for game inputs like GT rear-view).
+/// Press grip once while hovering to hold; press again to release (toggle, no need to keep squeezing).
 /// Position stays fixed; only rotates around a local axis. Uses hover + grip so XR never reparents the wheel.
 /// Wired onto the existing GLB <c>steering-wheel</c> mesh by <see cref="CabinetSteeringWheelSpawner"/>.
 /// </summary>
@@ -40,8 +41,10 @@ public class SteeringWheel : MonoBehaviour
     [Tooltip("Smooth applied rotation (0 = instant).")]
     [SerializeField] float rotationSmoothing = 18f;
 
-    [Header("Grab (grip)")]
+    [Header("Grab (grip toggle)")]
+    [Tooltip("Grip axis above this counts as pressed (rising edge toggles grab/release).")]
     [SerializeField] float gripPressThreshold = 0.55f;
+    [Tooltip("After a press, grip must fall below this before the next toggle edge is armed.")]
     [SerializeField] float gripReleaseThreshold = 0.35f;
     [SerializeField] bool hideHandsOnGrab = true;
     [SerializeField] bool logDebug;
@@ -72,6 +75,9 @@ public class SteeringWheel : MonoBehaviour
     LibretroControlMap controlMap;
     LibretroControlMap localControlMap;
 
+    /// <summary>World-space outer rim radius from mesh (cached); interaction collider is larger for hover.</summary>
+    float visualRimRadiusWorld = -1f;
+
     Vector3 homeLocalPosition;
     Quaternion homeLocalRotation;
     Vector3 homeLocalScale;
@@ -85,6 +91,10 @@ public class SteeringWheel : MonoBehaviour
     readonly List<HeldHand> heldHands = new List<HeldHand>();
     readonly List<Renderer> hiddenLeftRenderers = new List<Renderer>();
     readonly List<Renderer> hiddenRightRenderers = new List<Renderer>();
+
+    // Edge latch for grip toggle (per hand) — press once = hold, press again = release.
+    bool leftGripWasDown;
+    bool rightGripWasDown;
 
     struct HeldHand
     {
@@ -142,6 +152,8 @@ public class SteeringWheel : MonoBehaviour
 
         hovering.Clear();
         hasPreviousHandsAngle = false;
+        leftGripWasDown = false;
+        rightGripWasDown = false;
         ClearControlMapOverride();
         currentAngle = 0f;
         displayedAngle = 0f;
@@ -538,6 +550,8 @@ public class SteeringWheel : MonoBehaviour
             interactionCollider.center = Vector3.zero;
             interactionCollider.radius = 0.12f;
         }
+
+        visualRimRadiusWorld = -1f;
     }
 
     XRSimpleInteractable EnsureHoverInteractable()
@@ -557,7 +571,7 @@ public class SteeringWheel : MonoBehaviour
         if (physicsLayer >= 0)
             gameObject.layer = physicsLayer;
 
-        // Select unused — grab is driven by grip while hovering.
+        // Select unused — grab is driven by grip toggle while hovering.
         interactable.selectMode = InteractableSelectMode.Multiple;
         interactable.interactionLayers = InteractionLayerMask.GetMask(GrabInteractionLayers);
         interactable.colliders.Clear();
@@ -582,24 +596,99 @@ public class SteeringWheel : MonoBehaviour
 
     void UpdateGripHolds()
     {
-        // Start hold: hovering + grip pressed.
+        bool leftDown = ResolveGripDown(isLeft: true, leftGripWasDown);
+        bool rightDown = ResolveGripDown(isLeft: false, rightGripWasDown);
+        // Rising-edge flags; cleared when a hand consumes the toggle this frame
+        // so the same squeeze cannot release and re-grab (or vice versa).
+        bool leftEdge = leftDown && !leftGripWasDown;
+        bool rightEdge = rightDown && !rightGripWasDown;
+
+        // Toggle release: second grip press while holding (hover not required).
+        for (int i = heldHands.Count - 1; i >= 0; i--)
+        {
+            HeldHand held = heldHands[i];
+            if (held.Interactor == null)
+            {
+                EndHoldAt(i);
+                continue;
+            }
+
+            if (held.IsLeft)
+            {
+                if (!leftEdge)
+                    continue;
+                leftEdge = false;
+                EndHoldAt(i);
+            }
+            else
+            {
+                if (!rightEdge)
+                    continue;
+                rightEdge = false;
+                EndHoldAt(i);
+            }
+        }
+
+        // Toggle grab: first grip press while hovering.
         for (int i = 0; i < hovering.Count; i++)
         {
             IXRHoverInteractor interactor = hovering[i];
             if (interactor == null || IsHolding(interactor))
                 continue;
 
-            if (ReadGrip(interactor) >= gripPressThreshold)
+            bool isLeft = IsLeftInteractor(interactor);
+            if (isLeft)
+            {
+                if (!leftEdge)
+                    continue;
+                leftEdge = false;
                 BeginHold(interactor);
+            }
+            else
+            {
+                if (!rightEdge)
+                    continue;
+                rightEdge = false;
+                BeginHold(interactor);
+            }
         }
 
-        // End hold: grip released (can leave hover while still holding).
-        for (int i = heldHands.Count - 1; i >= 0; i--)
+        leftGripWasDown = leftDown;
+        rightGripWasDown = rightDown;
+    }
+
+    /// <summary>
+    /// Schmitt-trigger grip level so a single squeeze yields one rising-edge toggle.
+    /// </summary>
+    bool ResolveGripDown(bool isLeft, bool wasDown)
+    {
+        float grip = ReadGripForHand(isLeft);
+        if (wasDown)
+            return grip > gripReleaseThreshold;
+        return grip >= gripPressThreshold;
+    }
+
+    float ReadGripForHand(bool isLeft)
+    {
+        for (int i = 0; i < heldHands.Count; i++)
         {
-            HeldHand held = heldHands[i];
-            if (held.Interactor == null || ReadGrip(held.Interactor) <= gripReleaseThreshold)
-                EndHoldAt(i);
+            if (heldHands[i].IsLeft == isLeft && heldHands[i].Interactor != null)
+                return ReadGrip(heldHands[i].Interactor);
         }
+
+        for (int i = 0; i < hovering.Count; i++)
+        {
+            IXRHoverInteractor interactor = hovering[i];
+            if (interactor != null && IsLeftInteractor(interactor) == isLeft)
+                return ReadGrip(interactor);
+        }
+
+        XRNode node = isLeft ? XRNode.LeftHand : XRNode.RightHand;
+        InputDevice device = InputDevices.GetDeviceAtXRNode(node);
+        if (device.isValid && device.TryGetFeatureValue(CommonUsages.grip, out float axis))
+            return Mathf.Clamp01(axis);
+
+        return 0f;
     }
 
     void BeginHold(IXRHoverInteractor interactor)
@@ -663,7 +752,14 @@ public class SteeringWheel : MonoBehaviour
         GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         go.name = isLeft ? "SteeringGrabMarker_L" : "SteeringGrabMarker_R";
         go.transform.SetParent(transform, false);
-        go.transform.localScale = Vector3.one * (grabMarkerRadius * 2f);
+
+        // Constant world size regardless of cabinet / wheel scale.
+        float parentScale = Mathf.Max(
+            Mathf.Abs(transform.lossyScale.x),
+            Mathf.Abs(transform.lossyScale.y),
+            Mathf.Abs(transform.lossyScale.z));
+        float localDiameter = (grabMarkerRadius * 2f) / Mathf.Max(parentScale, 0.0001f);
+        go.transform.localScale = Vector3.one * localDiameter;
 
         Collider col = go.GetComponent<Collider>();
         if (col != null)
@@ -691,7 +787,7 @@ public class SteeringWheel : MonoBehaviour
     }
 
     /// <summary>
-    /// Snap marker onto the wheel rim at the hand's angular position and parent it so it
+    /// Snap marker onto the visual wheel rim at the hand's angular position and parent it so it
     /// stays flush and rotates with the wheel (does not follow the hand afterward).
     /// </summary>
     void PlaceGrabMarker(Transform marker, Vector3 handWorld)
@@ -701,20 +797,109 @@ public class SteeringWheel : MonoBehaviour
         Vector3 flat = Vector3.ProjectOnPlane(handWorld - pivot, axis);
         if (flat.sqrMagnitude < 0.0001f)
             flat = Vector3.ProjectOnPlane(RestWorldRotation() * GetPerpendicular(localRotationAxis), axis);
+        if (flat.sqrMagnitude < 0.0001f)
+            flat = Vector3.ProjectOnPlane(transform.right, axis);
 
         if (flat.sqrMagnitude < 0.0001f)
         {
-            marker.position = handWorld;
+            // Stay on the rim plane — never at raw hand (floats in front of the wheel).
+            marker.position = pivot;
             return;
         }
 
-        // Always on the outer rim so the sphere sits against the wheel, not in mid-air toward the hub.
-        float rimRadius = interactionCollider != null
-            ? Mathf.Max(0.05f, interactionCollider.radius * 0.92f
-                * Mathf.Max(transform.lossyScale.x, Mathf.Max(transform.lossyScale.y, transform.lossyScale.z)))
-            : 0.15f;
-
+        // Visual mesh rim (not the oversized hover SphereCollider), inset by marker radius.
+        float rimRadius = Mathf.Max(0.02f, GetVisualRimRadiusWorld() - grabMarkerRadius);
         marker.position = pivot + flat.normalized * rimRadius;
+    }
+
+    /// <summary>
+    /// Outer rim radius in world units from mesh bounds in the spin plane.
+    /// </summary>
+    float GetVisualRimRadiusWorld()
+    {
+        if (visualRimRadiusWorld > 0f)
+            return visualRimRadiusWorld;
+
+        Vector3 axisLocal = NormalizedLocalAxis();
+        float rimLocal = EstimateRimFromLocalExtents(axisLocal);
+        if (rimLocal < 0.01f)
+            rimLocal = interactionCollider != null ? interactionCollider.radius * 0.75f : 0.12f;
+
+        visualRimRadiusWorld = rimLocal * InPlaneLossyScale(axisLocal);
+        return visualRimRadiusWorld;
+    }
+
+    float EstimateRimFromLocalExtents(Vector3 axisLocal)
+    {
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        bool started = false;
+        Vector3 min = Vector3.zero;
+        Vector3 max = Vector3.zero;
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+                continue;
+            if (renderer.gameObject.name.StartsWith("SteeringGrabMarker", System.StringComparison.Ordinal))
+                continue;
+
+            Bounds world = renderer.bounds;
+            Vector3 c = world.center;
+            Vector3 e = world.extents;
+            for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+            for (int sz = -1; sz <= 1; sz += 2)
+            {
+                Vector3 local = transform.InverseTransformPoint(
+                    c + new Vector3(sx * e.x, sy * e.y, sz * e.z));
+                if (!started)
+                {
+                    min = max = local;
+                    started = true;
+                }
+                else
+                {
+                    min = Vector3.Min(min, local);
+                    max = Vector3.Max(max, local);
+                }
+            }
+        }
+
+        if (!started)
+            return 0f;
+
+        return InPlaneRadiusFromExtents((max - min) * 0.5f, axisLocal);
+    }
+
+    static float InPlaneRadiusFromExtents(Vector3 extents, Vector3 axisUnit)
+    {
+        Vector3 a = axisUnit.normalized;
+        float absX = Mathf.Abs(a.x);
+        float absY = Mathf.Abs(a.y);
+        float absZ = Mathf.Abs(a.z);
+
+        // Half-size of the disc in the plane perpendicular to the spin axis.
+        if (absZ >= absX && absZ >= absY)
+            return Mathf.Max(extents.x, extents.y);
+        if (absY >= absX && absY >= absZ)
+            return Mathf.Max(extents.x, extents.z);
+        return Mathf.Max(extents.y, extents.z);
+    }
+
+    float InPlaneLossyScale(Vector3 axisLocal)
+    {
+        Vector3 a = axisLocal.normalized;
+        Vector3 s = transform.lossyScale;
+        float absX = Mathf.Abs(a.x);
+        float absY = Mathf.Abs(a.y);
+        float absZ = Mathf.Abs(a.z);
+
+        if (absZ >= absX && absZ >= absY)
+            return Mathf.Max(Mathf.Abs(s.x), Mathf.Abs(s.y));
+        if (absY >= absX && absY >= absZ)
+            return Mathf.Max(Mathf.Abs(s.x), Mathf.Abs(s.z));
+        return Mathf.Max(Mathf.Abs(s.y), Mathf.Abs(s.z));
     }
 
     static void DestroyGrabMarker(Transform marker)
